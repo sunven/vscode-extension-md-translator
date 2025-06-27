@@ -1,0 +1,59 @@
+{
+  "name": "vscode-extension-file-extension-converter",
+  "displayName": "JS to JSX Converter",
+  "description": "Convert JavaScript files to JSX files via right-click menu",
+  "version": "1.0.0",
+  "publisher": "your-publisher-name",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "javascript",
+    "jsx",
+    "react",
+    "file",
+    "rename"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "jsToJsx.convertFile",
+        "title": "Convert to JSX",
+        "icon": "$(symbol-misc)"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "jsToJsx.convertFile",
+          "when": "resourceExtname == .js",
+          "group": "7_modification"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "jsToJsx.convertFile",
+          "when": "resourceExtname == .js",
+          "group": "1_modification"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "package": "vsce package",
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "16.x",
+    "@types/vscode": "^1.74.0",
+    "@vscode/vsce": "^3.6.0",
+    "typescript": "^4.9.4"
+  }
+}
