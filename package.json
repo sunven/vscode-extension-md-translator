@@ -2,7 +2,7 @@
   "name": "vscode-extension-md-translator",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "publisher": "sunven",
   "license": "MIT",
   "repository": {
