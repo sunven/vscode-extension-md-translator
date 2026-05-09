@@ -10,7 +10,9 @@ function activate(context) {
     const translateMarkdownCommand = vscode.commands.registerCommand("mdTranslator.translateMarkdownToChinese", async (uri) => runWithErrorBoundary("Failed to translate Markdown", () => (0, translateMarkdown_1.translateMarkdownToChinese)(context, translatedMarkdownProvider, uri)));
     const setApiKeyCommand = vscode.commands.registerCommand("mdTranslator.setApiKey", async () => (0, config_1.promptAndStoreApiKey)(context));
     const clearApiKeyCommand = vscode.commands.registerCommand("mdTranslator.clearApiKey", async () => (0, config_1.clearApiKey)(context));
-    context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider(translateMarkdown_1.TranslatedMarkdownContentProvider.scheme, translatedMarkdownProvider), translateMarkdownCommand, setApiKeyCommand, clearApiKeyCommand);
+    const replaceLastTranslation = vscode.commands.registerCommand(translateMarkdown_1.replaceLastTranslationCommand, async () => runWithErrorBoundary("Failed to replace Markdown translation", translateMarkdown_1.replaceLastPendingMarkdownTranslation));
+    const discardLastTranslation = vscode.commands.registerCommand(translateMarkdown_1.discardLastTranslationCommand, translateMarkdown_1.discardLastPendingMarkdownTranslation);
+    context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider(translateMarkdown_1.TranslatedMarkdownContentProvider.scheme, translatedMarkdownProvider), translateMarkdownCommand, setApiKeyCommand, clearApiKeyCommand, replaceLastTranslation, discardLastTranslation);
 }
 exports.activate = activate;
 async function runWithErrorBoundary(label, action) {

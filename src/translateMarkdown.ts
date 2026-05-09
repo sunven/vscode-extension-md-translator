@@ -2,10 +2,27 @@ import * as path from 'path'
 import * as vscode from 'vscode'
 import { getApiKey, promptAndStoreApiKey, readTranslationSettings } from './config'
 import { createTranslationBatches, parseMarkdownSegments, applyTranslations, validateTranslatedMarkdown } from './markdownSegments'
-import { translateSegmentsWithOpenAI } from './openaiClient'
+import { TranslationClientError, TranslationSegmentInput, translateSegmentsWithOpenAI } from './openaiClient'
 
 const replaceSourceAction = 'Replace Source'
 const discardAction = 'Discard'
+export const replaceLastTranslationCommand = 'mdTranslator.replaceLastTranslation'
+export const discardLastTranslationCommand = 'mdTranslator.discardLastTranslation'
+
+interface PendingMarkdownTranslation {
+  sourceUri: vscode.Uri
+  originalText: string
+  translatedText: string
+  replaceStatusBarItem: vscode.StatusBarItem
+  discardStatusBarItem: vscode.StatusBarItem
+}
+
+type PendingTranslationDependencies = Pick<
+  MarkdownTranslationDependencies,
+  'readFile' | 'writeFile' | 'showInformationMessage' | 'showErrorMessage'
+>
+
+let pendingMarkdownTranslation: PendingMarkdownTranslation | undefined
 
 export class TranslatedMarkdownContentProvider implements vscode.TextDocumentContentProvider {
   static readonly scheme = 'md-translator-translated'
@@ -112,6 +129,7 @@ export async function translateMarkdownToChinese(
 
   const batches = dependencies.createTranslationBatches(parsed.segments, settings.maxChunkChars)
   const translations = new Map<string, string>()
+  let translatedText = ''
   const loading = dependencies.createStatusBarItem(vscode.StatusBarAlignment.Left, 100)
   loading.text = '$(sync~spin) Translating Markdown to Chinese'
   loading.tooltip = 'Markdown translation is running'
@@ -123,27 +141,46 @@ export async function translateMarkdownToChinese(
       title: 'Translating Markdown to Chinese',
       cancellable: true
     }, async (progress, cancellationToken) => {
-      for (let index = 0; index < batches.length; index += 1) {
+      await translateBatchesIntoMap({
+        apiKey,
+        batches,
+        cancellationToken,
+        dependencies,
+        loading,
+        progress,
+        settings,
+        translations
+      })
+
+      translatedText = dependencies.applyTranslations(parsed, translations)
+
+      if (translatedText === originalText) {
         if (cancellationToken.isCancellationRequested) {
           throw new Error('Translation cancelled.')
         }
 
-        const chunkLabel = `Chunk ${index + 1} of ${batches.length}`
-        loading.text = `$(sync~spin) ${chunkLabel}`
-        loading.tooltip = chunkLabel
-        progress.report({
-          message: chunkLabel,
-          increment: index === 0 ? 0 : 100 / batches.length
+        translations.clear()
+        const retryLabel = 'Retrying unchanged translation'
+        loading.text = `$(sync~spin) ${retryLabel}`
+        loading.tooltip = retryLabel
+        progress.report({ message: retryLabel })
+
+        await translateBatchesIntoMap({
+          apiKey,
+          attemptLabel: 'Retry',
+          batches,
+          cancellationToken,
+          dependencies,
+          loading,
+          progress,
+          settings: {
+            ...settings,
+            targetLanguage: buildStrictRetryTargetLanguage(settings.targetLanguage)
+          },
+          translations
         })
 
-        const batchTranslations = await dependencies.translateSegmentsWithOpenAI({
-          ...settings,
-          apiKey
-        }, batches[index])
-
-        for (const [id, translatedText] of batchTranslations) {
-          translations.set(id, translatedText)
-        }
+        translatedText = dependencies.applyTranslations(parsed, translations)
       }
 
       progress.report({ increment: 100 })
@@ -152,11 +189,10 @@ export async function translateMarkdownToChinese(
     loading.dispose()
   }
 
-  const translatedText = dependencies.applyTranslations(parsed, translations)
   const validation = dependencies.validateTranslatedMarkdown(originalText, translatedText)
 
   if (!validation.valid) {
-    await dependencies.showErrorMessage(`Translation validation failed: ${validation.errors.join(' ')}`)
+    await dependencies.showErrorMessage(buildValidationFailureMessage(validation.errors))
     return
   }
 
@@ -170,25 +206,252 @@ export async function translateMarkdownToChinese(
     `${path.basename(sourceUri.fsPath)}: Original ↔ Chinese translation`
   )
 
+  setPendingMarkdownTranslation({
+    sourceUri,
+    originalText,
+    translatedText,
+    replaceStatusBarItem: createPendingTranslationStatusBarItem(
+      dependencies,
+      '$(check) Replace Translation',
+      'Replace the source Markdown with the pending translation',
+      replaceLastTranslationCommand,
+      99
+    ),
+    discardStatusBarItem: createPendingTranslationStatusBarItem(
+      dependencies,
+      '$(close) Discard Translation',
+      'Discard the pending Markdown translation',
+      discardLastTranslationCommand,
+      98
+    )
+  })
+
   const action = await dependencies.showInformationMessage(
     'Review the Markdown diff before replacing the source file.',
     replaceSourceAction,
     discardAction
   )
 
+  if (action === discardAction) {
+    discardPendingMarkdownTranslation()
+    return
+  }
+
   if (action !== replaceSourceAction) {
     return
   }
 
-  const currentText = Buffer.from(await dependencies.readFile(sourceUri)).toString('utf8')
+  await replacePendingMarkdownTranslation(dependencies)
+}
 
-  if (currentText !== originalText) {
+export async function replaceLastPendingMarkdownTranslation(
+  dependencies: PendingTranslationDependencies = defaultMarkdownTranslationDependencies
+): Promise<void> {
+  await replacePendingMarkdownTranslation(dependencies)
+}
+
+export function discardLastPendingMarkdownTranslation(): void {
+  discardPendingMarkdownTranslation()
+}
+
+async function translateBatchesIntoMap(args: {
+  apiKey: string
+  attemptLabel?: string
+  batches: TranslationSegmentInput[][]
+  cancellationToken: vscode.CancellationToken
+  dependencies: Pick<MarkdownTranslationDependencies, 'translateSegmentsWithOpenAI'>
+  loading: vscode.StatusBarItem
+  progress: vscode.Progress<{ message?: string; increment?: number }>
+  settings: ReturnType<typeof readTranslationSettings>
+  translations: Map<string, string>
+}): Promise<void> {
+  const { apiKey, attemptLabel, batches, cancellationToken, dependencies, loading, progress, settings, translations } = args
+
+  for (let index = 0; index < batches.length; index += 1) {
+    if (cancellationToken.isCancellationRequested) {
+      throw new Error('Translation cancelled.')
+    }
+
+    const chunkLabel = `${attemptLabel ? `${attemptLabel} ` : ''}Chunk ${index + 1} of ${batches.length}`
+    loading.text = `$(sync~spin) ${chunkLabel}`
+    loading.tooltip = chunkLabel
+    progress.report({
+      message: chunkLabel,
+      increment: index === 0 ? 0 : 100 / batches.length
+    })
+
+    const batch = batches[index]
+    let batchTranslations: Map<string, string>
+
+    try {
+      batchTranslations = await translateBatchWithRecovery(
+        dependencies.translateSegmentsWithOpenAI,
+        {
+          ...settings,
+          apiKey
+        },
+        batch
+      )
+    } catch (error) {
+      throw buildBatchTranslationError(error, index, batches.length, batch)
+    }
+
+    for (const [id, translatedText] of batchTranslations) {
+      translations.set(id, translatedText)
+    }
+  }
+}
+
+async function replacePendingMarkdownTranslation(dependencies: PendingTranslationDependencies): Promise<void> {
+  const pending = pendingMarkdownTranslation
+
+  if (!pending) {
+    await dependencies.showInformationMessage('No pending Markdown translation to replace.')
+    return
+  }
+
+  const currentText = Buffer.from(await dependencies.readFile(pending.sourceUri)).toString('utf8')
+
+  if (currentText !== pending.originalText) {
     await dependencies.showErrorMessage('Source file changed while translation was running. Re-run translation before replacing it.')
     return
   }
 
-  await dependencies.writeFile(sourceUri, Buffer.from(translatedText, 'utf8'))
+  await dependencies.writeFile(pending.sourceUri, Buffer.from(pending.translatedText, 'utf8'))
+  discardPendingMarkdownTranslation()
   await dependencies.showInformationMessage('Markdown source replaced with the Chinese translation.')
+}
+
+function setPendingMarkdownTranslation(pending: PendingMarkdownTranslation): void {
+  discardPendingMarkdownTranslation()
+  pendingMarkdownTranslation = pending
+  pending.replaceStatusBarItem.show()
+  pending.discardStatusBarItem.show()
+}
+
+function discardPendingMarkdownTranslation(): void {
+  pendingMarkdownTranslation?.replaceStatusBarItem.dispose()
+  pendingMarkdownTranslation?.discardStatusBarItem.dispose()
+  pendingMarkdownTranslation = undefined
+}
+
+function createPendingTranslationStatusBarItem(
+  dependencies: Pick<MarkdownTranslationDependencies, 'createStatusBarItem'>,
+  text: string,
+  tooltip: string,
+  command: string,
+  priority: number
+): vscode.StatusBarItem {
+  const item = dependencies.createStatusBarItem(vscode.StatusBarAlignment.Left, priority)
+  item.text = text
+  item.tooltip = tooltip
+  item.command = command
+  return item
+}
+
+function buildStrictRetryTargetLanguage(targetLanguage: string): string {
+  return `${targetLanguage}. The previous attempt returned unchanged source text. Translate every English prose segment into ${targetLanguage}; do not copy the English source text unless it is a protected term, brand name, code token, URL, or file path.`
+}
+
+function buildValidationFailureMessage(errors: string[]): string {
+  if (errors.length === 1 && errors[0] === 'Translated Markdown is identical to the source.') {
+    return [
+      'Translation failed because the provider returned unchanged source text.',
+      'Try a stronger translation model, lower temperature, or enable JSON response format if your provider supports it.'
+    ].join(' ')
+  }
+
+  return `Translation validation failed: ${errors.join(' ')}`
+}
+
+async function translateBatchWithRecovery(
+  translateSegments: typeof translateSegmentsWithOpenAI,
+  options: Parameters<typeof translateSegmentsWithOpenAI>[0],
+  segments: TranslationSegmentInput[]
+): Promise<Map<string, string>> {
+  try {
+    return await translateSegments(options, segments)
+  } catch {
+    try {
+      return await translateSegments(options, segments)
+    } catch (retryError) {
+      if (!canRecoverBySingleSegmentFallback(retryError, segments)) {
+        throw retryError
+      }
+
+      const recovered = new Map<string, string>()
+
+      for (const segment of segments) {
+        let segmentTranslations: Map<string, string>
+
+        try {
+          segmentTranslations = await translateSegments(options, [segment])
+        } catch (segmentError) {
+          throw buildSingleSegmentFallbackError(segmentError, segment.id)
+        }
+
+        for (const [id, translatedText] of segmentTranslations) {
+          recovered.set(id, translatedText)
+        }
+      }
+
+      return recovered
+    }
+  }
+}
+
+function canRecoverBySingleSegmentFallback(error: unknown, segments: TranslationSegmentInput[]): boolean {
+  if (segments.length <= 1 || !(error instanceof TranslationClientError)) {
+    return false
+  }
+
+  return [
+    'Provider returned conflicting translation for segment id:',
+    'Provider response is missing segment id:',
+    'Provider returned unknown segment id:',
+    'Provider returned invalid JSON:',
+    'Provider response must contain a translations array.',
+    'Provider response did not contain a JSON object.'
+  ].some(message => error.message.includes(message))
+}
+
+function buildBatchTranslationError(
+  error: unknown,
+  batchIndex: number,
+  batchCount: number,
+  segments: TranslationSegmentInput[]
+): TranslationClientError {
+  const message = error instanceof Error ? error.message : 'Unknown provider error.'
+  const status = error instanceof TranslationClientError ? error.status : undefined
+
+  return new TranslationClientError(
+    `Chunk ${batchIndex + 1} of ${batchCount} failed for ${formatSegmentIds(segments)}: ${message}`,
+    status
+  )
+}
+
+function buildSingleSegmentFallbackError(error: unknown, segmentId: string): TranslationClientError {
+  const message = error instanceof Error ? error.message : 'Unknown provider error.'
+  const status = error instanceof TranslationClientError ? error.status : undefined
+
+  return new TranslationClientError(
+    `Single-segment retry failed for ${segmentId}: ${message}`,
+    status
+  )
+}
+
+function formatSegmentIds(segments: TranslationSegmentInput[]): string {
+  const ids = segments.map(segment => segment.id)
+
+  if (ids.length === 1) {
+    return `segment ${ids[0]}`
+  }
+
+  if (ids.length <= 4) {
+    return `segments ${ids.join(', ')}`
+  }
+
+  return `segments ${ids[0]}-${ids[ids.length - 1]} (${ids.length} total)`
 }
 
 function createTranslatedMarkdownUri(sourceUri: vscode.Uri): vscode.Uri {

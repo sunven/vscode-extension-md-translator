@@ -1,6 +1,10 @@
 import * as vscode from "vscode";
 import { clearApiKey, promptAndStoreApiKey } from "./config";
 import {
+	discardLastPendingMarkdownTranslation,
+	discardLastTranslationCommand,
+	replaceLastPendingMarkdownTranslation,
+	replaceLastTranslationCommand,
 	TranslatedMarkdownContentProvider,
 	translateMarkdownToChinese,
 } from "./translateMarkdown";
@@ -28,6 +32,20 @@ export function activate(context: vscode.ExtensionContext) {
 		async () => clearApiKey(context),
 	);
 
+	const replaceLastTranslation = vscode.commands.registerCommand(
+		replaceLastTranslationCommand,
+		async () =>
+			runWithErrorBoundary(
+				"Failed to replace Markdown translation",
+				replaceLastPendingMarkdownTranslation,
+			),
+	);
+
+	const discardLastTranslation = vscode.commands.registerCommand(
+		discardLastTranslationCommand,
+		discardLastPendingMarkdownTranslation,
+	);
+
 	context.subscriptions.push(
 		vscode.workspace.registerTextDocumentContentProvider(
 			TranslatedMarkdownContentProvider.scheme,
@@ -36,6 +54,8 @@ export function activate(context: vscode.ExtensionContext) {
 		translateMarkdownCommand,
 		setApiKeyCommand,
 		clearApiKeyCommand,
+		replaceLastTranslation,
+		discardLastTranslation,
 	);
 }
 
