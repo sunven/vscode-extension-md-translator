@@ -1,5 +1,8 @@
+.github/**
+.vscode/**
 .vscode-test/**
 .vscode-test.mjs
+.git/**
 .gitignore
 TODOS.md
 pnpm-lock.yaml
