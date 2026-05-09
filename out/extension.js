@@ -5,7 +5,7 @@ const vscode = require("vscode");
 const config_1 = require("./config");
 const translateMarkdown_1 = require("./translateMarkdown");
 function activate(context) {
-    console.log("Markdown AI Translator extension is now active!");
+    console.log("MD AI Translator extension is now active!");
     const translatedMarkdownProvider = new translateMarkdown_1.TranslatedMarkdownContentProvider();
     const translateMarkdownCommand = vscode.commands.registerCommand("mdTranslator.translateMarkdownToChinese", async (uri) => runWithErrorBoundary("Failed to translate Markdown", () => (0, translateMarkdown_1.translateMarkdownToChinese)(context, translatedMarkdownProvider, uri)));
     const setApiKeyCommand = vscode.commands.registerCommand("mdTranslator.setApiKey", async () => (0, config_1.promptAndStoreApiKey)(context));
@@ -22,7 +22,7 @@ async function runWithErrorBoundary(label, action) {
     }
 }
 function deactivate() {
-    console.log("Markdown AI Translator extension is now deactivated!");
+    console.log("MD AI Translator extension is now deactivated!");
 }
 exports.deactivate = deactivate;
 //# sourceMappingURL=extension.js.map

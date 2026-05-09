@@ -6,7 +6,7 @@ import {
 } from "./translateMarkdown";
 
 export function activate(context: vscode.ExtensionContext) {
-	console.log("Markdown AI Translator extension is now active!");
+	console.log("MD AI Translator extension is now active!");
 
 	const translatedMarkdownProvider = new TranslatedMarkdownContentProvider();
 
@@ -53,5 +53,5 @@ async function runWithErrorBoundary(
 }
 
 export function deactivate() {
-	console.log("Markdown AI Translator extension is now deactivated!");
+	console.log("MD AI Translator extension is now deactivated!");
 }
