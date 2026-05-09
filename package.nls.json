@@ -1,10 +1,10 @@
 {
-  "extension.displayName": "Markdown Translator",
+  "extension.displayName": "Sunven Markdown Translator",
   "extension.description": "Safely translate Markdown to Chinese with OpenAI-compatible providers",
   "command.translateMarkdownToChinese.title": "Translate Markdown to Chinese",
   "command.setApiKey.title": "Set OpenAI-compatible API Key",
   "command.clearApiKey.title": "Clear OpenAI-compatible API Key",
-  "configuration.title": "Markdown Translator",
+  "configuration.title": "Sunven Markdown Translator",
   "configuration.apiBaseUrl.description": "OpenAI-compatible API base URL.",
   "configuration.model.description": "Model used for Markdown translation.",
   "configuration.temperature.description": "Sampling temperature for translation.",
