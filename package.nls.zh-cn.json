@@ -1,0 +1,16 @@
+{
+  "extension.displayName": "Markdown 翻译器",
+  "extension.description": "使用 OpenAI 兼容服务安全地将 Markdown 翻译为中文",
+  "command.translateMarkdownToChinese.title": "将 Markdown 翻译为中文",
+  "command.setApiKey.title": "设置 OpenAI 兼容 API Key",
+  "command.clearApiKey.title": "清除 OpenAI 兼容 API Key",
+  "configuration.title": "Markdown 翻译器",
+  "configuration.apiBaseUrl.description": "OpenAI 兼容 API 的 base URL。",
+  "configuration.model.description": "用于 Markdown 翻译的模型。",
+  "configuration.temperature.description": "翻译请求的采样温度。",
+  "configuration.maxChunkChars.description": "每个翻译批次允许的最大源文本字符数。",
+  "configuration.maxResponseTokens.description": "每次翻译请求允许的最大响应 token 数。",
+  "configuration.targetLanguage.description": "Markdown 翻译的目标语言。",
+  "configuration.requestTimeoutMs.description": "每次 OpenAI 兼容 API 请求的超时时间，单位为毫秒。",
+  "configuration.useJsonResponseFormat.description": "向支持 OpenAI JSON mode 的服务发送 response_format={\"type\":\"json_object\"}。"
+}

@@ -1,45 +1,110 @@
 {
   "name": "vscode-extension-file-extension-converter",
-  "displayName": "JS to JSX Converter",
-  "description": "Convert JavaScript files to JSX files via right-click menu",
+  "displayName": "%extension.displayName%",
+  "description": "%extension.description%",
   "version": "1.0.0",
   "publisher": "your-publisher-name",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sunven/vscode-extension-file-extension-converter.git"
+  },
   "engines": {
-    "vscode": "^1.74.0"
+    "vscode": "^1.90.0"
   },
   "categories": [
     "Other"
   ],
   "keywords": [
-    "javascript",
-    "jsx",
-    "react",
-    "file",
-    "rename"
+    "markdown",
+    "translation",
+    "openai",
+    "vscode",
+    "llm"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onCommand:fileExtensionConverter.translateMarkdownToChinese",
+    "onCommand:fileExtensionConverter.setApiKey",
+    "onCommand:fileExtensionConverter.clearApiKey"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "jsToJsx.convertFile",
-        "title": "Convert to JSX",
-        "icon": "$(symbol-misc)"
+        "command": "fileExtensionConverter.translateMarkdownToChinese",
+        "title": "%command.translateMarkdownToChinese.title%",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "fileExtensionConverter.setApiKey",
+        "title": "%command.setApiKey.title%",
+        "icon": "$(key)"
+      },
+      {
+        "command": "fileExtensionConverter.clearApiKey",
+        "title": "%command.clearApiKey.title%",
+        "icon": "$(trash)"
       }
     ],
-    "menus": {
-      "explorer/context": [
-        {
-          "command": "jsToJsx.convertFile",
-          "when": "resourceExtname == .js",
-          "group": "7_modification"
+    "configuration": {
+      "title": "%configuration.title%",
+      "properties": {
+        "fileExtensionConverter.apiBaseUrl": {
+          "type": "string",
+          "default": "https://api.openai.com/v1",
+          "description": "%configuration.apiBaseUrl.description%"
+        },
+        "fileExtensionConverter.model": {
+          "type": "string",
+          "default": "gpt-4o-mini",
+          "description": "%configuration.model.description%"
+        },
+        "fileExtensionConverter.temperature": {
+          "type": "number",
+          "default": 0.2,
+          "minimum": 0,
+          "maximum": 2,
+          "description": "%configuration.temperature.description%"
+        },
+        "fileExtensionConverter.maxChunkChars": {
+          "type": "number",
+          "default": 6000,
+          "minimum": 1000,
+          "maximum": 20000,
+          "description": "%configuration.maxChunkChars.description%"
+        },
+        "fileExtensionConverter.maxResponseTokens": {
+          "type": "number",
+          "default": 4000,
+          "minimum": 256,
+          "maximum": 64000,
+          "description": "%configuration.maxResponseTokens.description%"
+        },
+        "fileExtensionConverter.targetLanguage": {
+          "type": "string",
+          "default": "Simplified Chinese",
+          "description": "%configuration.targetLanguage.description%"
+        },
+        "fileExtensionConverter.requestTimeoutMs": {
+          "type": "number",
+          "default": 60000,
+          "minimum": 5000,
+          "maximum": 300000,
+          "description": "%configuration.requestTimeoutMs.description%"
+        },
+        "fileExtensionConverter.useJsonResponseFormat": {
+          "type": "boolean",
+          "default": false,
+          "description": "%configuration.useJsonResponseFormat.description%"
         }
-      ],
-      "editor/context": [
+      }
+    },
+    "menus": {
+      "editor/title": [
         {
-          "command": "jsToJsx.convertFile",
-          "when": "resourceExtname == .js",
-          "group": "1_modification"
+          "command": "fileExtensionConverter.translateMarkdownToChinese",
+          "when": "resourceExtname == .md",
+          "group": "navigation"
         }
       ]
     }
@@ -48,11 +113,15 @@
     "package": "vsce package",
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
+    "test": "npm run compile && vscode-test",
     "watch": "tsc -watch -p ./"
   },
   "devDependencies": {
-    "@types/node": "16.x",
-    "@types/vscode": "^1.74.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "~20.19.40",
+    "@types/vscode": "^1.90.0",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^3.6.0",
     "typescript": "^4.9.4"
   }

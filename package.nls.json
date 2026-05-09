@@ -1,0 +1,16 @@
+{
+  "extension.displayName": "Markdown Translator",
+  "extension.description": "Safely translate Markdown to Chinese with OpenAI-compatible providers",
+  "command.translateMarkdownToChinese.title": "Translate Markdown to Chinese",
+  "command.setApiKey.title": "Set OpenAI-compatible API Key",
+  "command.clearApiKey.title": "Clear OpenAI-compatible API Key",
+  "configuration.title": "Markdown Translator",
+  "configuration.apiBaseUrl.description": "OpenAI-compatible API base URL.",
+  "configuration.model.description": "Model used for Markdown translation.",
+  "configuration.temperature.description": "Sampling temperature for translation.",
+  "configuration.maxChunkChars.description": "Maximum source characters per translation batch.",
+  "configuration.maxResponseTokens.description": "Maximum response tokens for each translation request.",
+  "configuration.targetLanguage.description": "Target language for Markdown translation.",
+  "configuration.requestTimeoutMs.description": "Timeout in milliseconds for each OpenAI-compatible API request.",
+  "configuration.useJsonResponseFormat.description": "Send response_format={\"type\":\"json_object\"} to providers that support OpenAI JSON mode."
+}
