@@ -1,6 +1,6 @@
 import * as vscode from 'vscode'
 
-const API_KEY_SECRET = 'fileExtensionConverter.openAiCompatibleApiKey'
+const API_KEY_SECRET = 'mdTranslator.openAiCompatibleApiKey'
 
 export interface TranslationSettings {
   apiBaseUrl: string
@@ -14,7 +14,7 @@ export interface TranslationSettings {
 }
 
 export function readTranslationSettings(): TranslationSettings {
-  const config = vscode.workspace.getConfiguration('fileExtensionConverter')
+  const config = vscode.workspace.getConfiguration('mdTranslator')
 
   return {
     apiBaseUrl: normalizeBaseUrl(config.get('apiBaseUrl', 'https://api.openai.com/v1')),

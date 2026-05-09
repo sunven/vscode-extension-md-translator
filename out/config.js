@@ -2,9 +2,9 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.clearApiKey = exports.promptAndStoreApiKey = exports.getApiKey = exports.readTranslationSettings = void 0;
 const vscode = require("vscode");
-const API_KEY_SECRET = 'fileExtensionConverter.openAiCompatibleApiKey';
+const API_KEY_SECRET = 'mdTranslator.openAiCompatibleApiKey';
 function readTranslationSettings() {
-    const config = vscode.workspace.getConfiguration('fileExtensionConverter');
+    const config = vscode.workspace.getConfiguration('mdTranslator');
     return {
         apiBaseUrl: normalizeBaseUrl(config.get('apiBaseUrl', 'https://api.openai.com/v1')),
         model: config.get('model', 'gpt-4o-mini').trim(),

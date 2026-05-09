@@ -19,14 +19,14 @@
 
    ```json
    {
-     "fileExtensionConverter.apiBaseUrl": "https://api.openai.com/v1",
-     "fileExtensionConverter.model": "gpt-4o-mini",
-     "fileExtensionConverter.temperature": 0.2,
-     "fileExtensionConverter.maxChunkChars": 6000,
-     "fileExtensionConverter.maxResponseTokens": 4000,
-     "fileExtensionConverter.targetLanguage": "Simplified Chinese",
-     "fileExtensionConverter.requestTimeoutMs": 60000,
-     "fileExtensionConverter.useJsonResponseFormat": false
+     "mdTranslator.apiBaseUrl": "https://api.openai.com/v1",
+     "mdTranslator.model": "gpt-4o-mini",
+     "mdTranslator.temperature": 0.2,
+     "mdTranslator.maxChunkChars": 6000,
+     "mdTranslator.maxResponseTokens": 4000,
+     "mdTranslator.targetLanguage": "Simplified Chinese",
+     "mdTranslator.requestTimeoutMs": 60000,
+     "mdTranslator.useJsonResponseFormat": false
    }
    ```
 
@@ -69,7 +69,7 @@
 3. 安装生成的 `.vsix` 文件：
 
    ```bash
-   code --install-extension vscode-extension-file-extension-converter-1.0.0.vsix
+   code --install-extension vscode-extension-md-translator-1.0.0.vsix
    ```
 
 ## 项目结构

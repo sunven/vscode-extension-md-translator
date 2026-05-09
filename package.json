@@ -1,13 +1,13 @@
 {
-  "name": "vscode-extension-file-extension-converter",
+  "name": "vscode-extension-md-translator",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
   "version": "0.0.2",
-  "publisher": "markdowntranslator",
+  "publisher": "sunven",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/sunven/vscode-extension-file-extension-converter.git"
+    "url": "https://github.com/sunven/vscode-extension-md-translator"
   },
   "engines": {
     "vscode": "^1.90.0"
@@ -23,25 +23,25 @@
     "llm"
   ],
   "activationEvents": [
-    "onCommand:fileExtensionConverter.translateMarkdownToChinese",
-    "onCommand:fileExtensionConverter.setApiKey",
-    "onCommand:fileExtensionConverter.clearApiKey"
+    "onCommand:mdTranslator.translateMarkdownToChinese",
+    "onCommand:mdTranslator.setApiKey",
+    "onCommand:mdTranslator.clearApiKey"
   ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "fileExtensionConverter.translateMarkdownToChinese",
+        "command": "mdTranslator.translateMarkdownToChinese",
         "title": "%command.translateMarkdownToChinese.title%",
         "icon": "$(globe)"
       },
       {
-        "command": "fileExtensionConverter.setApiKey",
+        "command": "mdTranslator.setApiKey",
         "title": "%command.setApiKey.title%",
         "icon": "$(key)"
       },
       {
-        "command": "fileExtensionConverter.clearApiKey",
+        "command": "mdTranslator.clearApiKey",
         "title": "%command.clearApiKey.title%",
         "icon": "$(trash)"
       }
@@ -49,50 +49,50 @@
     "configuration": {
       "title": "%configuration.title%",
       "properties": {
-        "fileExtensionConverter.apiBaseUrl": {
+        "mdTranslator.apiBaseUrl": {
           "type": "string",
           "default": "https://api.openai.com/v1",
           "description": "%configuration.apiBaseUrl.description%"
         },
-        "fileExtensionConverter.model": {
+        "mdTranslator.model": {
           "type": "string",
           "default": "gpt-4o-mini",
           "description": "%configuration.model.description%"
         },
-        "fileExtensionConverter.temperature": {
+        "mdTranslator.temperature": {
           "type": "number",
           "default": 0.2,
           "minimum": 0,
           "maximum": 2,
           "description": "%configuration.temperature.description%"
         },
-        "fileExtensionConverter.maxChunkChars": {
+        "mdTranslator.maxChunkChars": {
           "type": "number",
           "default": 6000,
           "minimum": 1000,
           "maximum": 20000,
           "description": "%configuration.maxChunkChars.description%"
         },
-        "fileExtensionConverter.maxResponseTokens": {
+        "mdTranslator.maxResponseTokens": {
           "type": "number",
           "default": 4000,
           "minimum": 256,
           "maximum": 64000,
           "description": "%configuration.maxResponseTokens.description%"
         },
-        "fileExtensionConverter.targetLanguage": {
+        "mdTranslator.targetLanguage": {
           "type": "string",
           "default": "Simplified Chinese",
           "description": "%configuration.targetLanguage.description%"
         },
-        "fileExtensionConverter.requestTimeoutMs": {
+        "mdTranslator.requestTimeoutMs": {
           "type": "number",
           "default": 60000,
           "minimum": 5000,
           "maximum": 300000,
           "description": "%configuration.requestTimeoutMs.description%"
         },
-        "fileExtensionConverter.useJsonResponseFormat": {
+        "mdTranslator.useJsonResponseFormat": {
           "type": "boolean",
           "default": false,
           "description": "%configuration.useJsonResponseFormat.description%"
@@ -102,7 +102,7 @@
     "menus": {
       "editor/title": [
         {
-          "command": "fileExtensionConverter.translateMarkdownToChinese",
+          "command": "mdTranslator.translateMarkdownToChinese",
           "when": "resourceExtname == .md",
           "group": "navigation"
         }

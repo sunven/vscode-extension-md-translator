@@ -3,12 +3,12 @@ import { clearApiKey, promptAndStoreApiKey } from './config'
 import { TranslatedMarkdownContentProvider, translateMarkdownToChinese } from './translateMarkdown'
 
 export function activate(context: vscode.ExtensionContext) {
-  console.log('File Extension Converter extension is now active!')
+  console.log('MD Translator extension is now active!')
 
   const translatedMarkdownProvider = new TranslatedMarkdownContentProvider()
 
   const translateMarkdownCommand = vscode.commands.registerCommand(
-    'fileExtensionConverter.translateMarkdownToChinese',
+    'mdTranslator.translateMarkdownToChinese',
     async (uri?: vscode.Uri) => runWithErrorBoundary(
       'Failed to translate Markdown',
       () => translateMarkdownToChinese(context, translatedMarkdownProvider, uri)
@@ -16,12 +16,12 @@ export function activate(context: vscode.ExtensionContext) {
   )
 
   const setApiKeyCommand = vscode.commands.registerCommand(
-    'fileExtensionConverter.setApiKey',
+    'mdTranslator.setApiKey',
     async () => promptAndStoreApiKey(context)
   )
 
   const clearApiKeyCommand = vscode.commands.registerCommand(
-    'fileExtensionConverter.clearApiKey',
+    'mdTranslator.clearApiKey',
     async () => clearApiKey(context)
   )
 
@@ -47,5 +47,5 @@ async function runWithErrorBoundary(label: string, action: () => Promise<void>):
 }
 
 export function deactivate() {
-  console.log('File Extension Converter extension is now deactivated!')
+  console.log('MD Translator extension is now deactivated!')
 }

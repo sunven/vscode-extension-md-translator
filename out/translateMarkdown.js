@@ -9,7 +9,7 @@ const openaiClient_1 = require("./openaiClient");
 const replaceSourceAction = 'Replace Source';
 const discardAction = 'Discard';
 class TranslatedMarkdownContentProvider {
-    static scheme = 'file-extension-converter-translated';
+    static scheme = 'md-translator-translated';
     content = new Map();
     changeEmitter = new vscode.EventEmitter();
     onDidChange = this.changeEmitter.event;

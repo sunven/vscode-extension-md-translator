@@ -8,7 +8,7 @@ const replaceSourceAction = 'Replace Source'
 const discardAction = 'Discard'
 
 export class TranslatedMarkdownContentProvider implements vscode.TextDocumentContentProvider {
-  static readonly scheme = 'file-extension-converter-translated'
+  static readonly scheme = 'md-translator-translated'
 
   private readonly content = new Map<string, string>()
   private readonly changeEmitter = new vscode.EventEmitter<vscode.Uri>()

@@ -6,19 +6,19 @@ import { TranslatedMarkdownContentProvider, translateMarkdownToChinese, Markdown
 
 describe('extension contributions', () => {
   it('contributes the public commands users need', async () => {
-    const extension = vscode.extensions.all.find(item => item.packageJSON.name === 'vscode-extension-file-extension-converter')
+    const extension = vscode.extensions.all.find(item => item.packageJSON.name === 'vscode-extension-md-translator')
     assert.ok(extension, 'development extension should be installed in the test host')
 
     await extension.activate()
 
-    const translateMarkdownCommand = extension.packageJSON.contributes.commands.find((command: { command: string }) => command.command === 'fileExtensionConverter.translateMarkdownToChinese')
+    const translateMarkdownCommand = extension.packageJSON.contributes.commands.find((command: { command: string }) => command.command === 'mdTranslator.translateMarkdownToChinese')
     assert.ok(translateMarkdownCommand, 'translate command should be contributed')
 
     const commands = await vscode.commands.getCommands(true)
 
-    assert.ok(commands.includes('fileExtensionConverter.translateMarkdownToChinese'))
-    assert.ok(commands.includes('fileExtensionConverter.setApiKey'))
-    assert.ok(commands.includes('fileExtensionConverter.clearApiKey'))
+    assert.ok(commands.includes('mdTranslator.translateMarkdownToChinese'))
+    assert.ok(commands.includes('mdTranslator.setApiKey'))
+    assert.ok(commands.includes('mdTranslator.clearApiKey'))
     assert.equal(translateMarkdownCommand.icon, '$(globe)')
   })
 
