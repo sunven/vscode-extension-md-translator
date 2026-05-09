@@ -1,10 +1,10 @@
 {
-  "extension.displayName": "Sunven Markdown 翻译器",
+  "extension.displayName": "MD Translator",
   "extension.description": "使用 OpenAI 兼容服务安全地将 Markdown 翻译为中文",
   "command.translateMarkdownToChinese.title": "将 Markdown 翻译为中文",
   "command.setApiKey.title": "设置 OpenAI 兼容 API Key",
   "command.clearApiKey.title": "清除 OpenAI 兼容 API Key",
-  "configuration.title": "Sunven Markdown 翻译器",
+  "configuration.title": "MD Translator",
   "configuration.apiBaseUrl.description": "OpenAI 兼容 API 的 base URL。",
   "configuration.model.description": "用于 Markdown 翻译的模型。",
   "configuration.temperature.description": "翻译请求的采样温度。",
