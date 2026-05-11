@@ -119,6 +119,49 @@ describe('extension contributions', () => {
     assert.deepEqual(calls, [{ type: 'show' }, { type: 'dispose' }])
   })
 
+  it('reports notification progress by completed chunks', async () => {
+    const segments = [
+      { id: 's1', text: 'First paragraph.' },
+      { id: 's2', text: 'Second paragraph.' },
+      { id: 's3', text: 'Third paragraph.' }
+    ]
+    const progressReports: Array<{ message?: string; increment?: number }> = []
+
+    const dependencies = createSingleSegmentTranslationDependencies({
+      readFile: async () => Buffer.from(segments.map(segment => segment.text).join('\n\n')),
+      withProgress: async (_options, task) => task({
+        report(update) {
+          progressReports.push(update)
+        }
+      }, { isCancellationRequested: false } as vscode.CancellationToken),
+      parseMarkdownSegments: () => ({
+        tokens: segments.map(segment => ({ kind: 'segment' as const, id: segment.id, original: segment.text })),
+        segments
+      }),
+      createTranslationBatches: () => segments.map(segment => [segment]),
+      translateSegmentsWithOpenAI: async (_options, batchSegments) => new Map(batchSegments.map(segment => [segment.id, `译文-${segment.id}`])),
+      applyTranslations: (_parsed, translations) => segments.map(segment => translations.get(segment.id)).join('\n')
+    })
+
+    await translateMarkdownToChinese(
+      { secrets: { get: async () => 'test-key' } } as unknown as vscode.ExtensionContext,
+      new TranslatedMarkdownContentProvider(),
+      vscode.Uri.file('/tmp/doc.md'),
+      dependencies
+    )
+
+    const increment = 100 / 3
+    assert.deepEqual(progressReports, [
+      { message: '0 of 3 chunks complete' },
+      { message: '1 of 3 chunks complete', increment },
+      { message: '2 of 3 chunks complete', increment },
+      { message: '3 of 3 chunks complete', increment },
+      { message: 'Applying translations' }
+    ])
+
+    discardLastPendingMarkdownTranslation()
+  })
+
   it('recovers from malformed provider responses by retrying and isolating segments', async () => {
     const segments = [
       { id: 's1', text: 'First paragraph.' },

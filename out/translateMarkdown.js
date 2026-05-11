@@ -92,6 +92,7 @@ async function translateMarkdownToChinese(context, contentProvider, uri, depende
                 settings,
                 translations
             });
+            progress.report({ message: 'Applying translations' });
             translatedText = dependencies.applyTranslations(parsed, translations);
             if (translatedText === originalText) {
                 if (cancellationToken.isCancellationRequested) {
@@ -116,9 +117,9 @@ async function translateMarkdownToChinese(context, contentProvider, uri, depende
                     },
                     translations
                 });
+                progress.report({ message: 'Applying translations' });
                 translatedText = dependencies.applyTranslations(parsed, translations);
             }
-            progress.report({ increment: 100 });
         });
     }
     finally {
@@ -160,6 +161,8 @@ function discardLastPendingMarkdownTranslation() {
 exports.discardLastPendingMarkdownTranslation = discardLastPendingMarkdownTranslation;
 async function translateBatchesIntoMap(args) {
     const { apiKey, attemptLabel, batches, cancellationToken, dependencies, loading, progress, settings, translations } = args;
+    const progressIncrement = 100 / batches.length;
+    progress.report({ message: `0 of ${batches.length} chunks complete` });
     for (let index = 0; index < batches.length; index += 1) {
         if (cancellationToken.isCancellationRequested) {
             throw new Error('Translation cancelled.');
@@ -167,10 +170,6 @@ async function translateBatchesIntoMap(args) {
         const chunkLabel = `${attemptLabel ? `${attemptLabel} ` : ''}Chunk ${index + 1} of ${batches.length}`;
         loading.text = `$(sync~spin) ${chunkLabel}`;
         loading.tooltip = chunkLabel;
-        progress.report({
-            message: chunkLabel,
-            increment: index === 0 ? 0 : 100 / batches.length
-        });
         const batch = batches[index];
         let batchTranslations;
         try {
@@ -185,6 +184,10 @@ async function translateBatchesIntoMap(args) {
         for (const [id, translatedText] of batchTranslations) {
             translations.set(id, translatedText);
         }
+        progress.report({
+            message: `${index + 1} of ${batches.length} chunks complete`,
+            increment: progressIncrement
+        });
     }
 }
 async function replacePendingMarkdownTranslation(dependencies) {
