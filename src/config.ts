@@ -7,10 +7,12 @@ export interface TranslationSettings {
   model: string
   temperature: number
   maxChunkChars: number
+  maxSegmentsPerChunk: number
   maxResponseTokens: number
   targetLanguage: string
   requestTimeoutMs: number
   useJsonResponseFormat: boolean
+  disableThinking: boolean
 }
 
 export function readTranslationSettings(): TranslationSettings {
@@ -20,11 +22,13 @@ export function readTranslationSettings(): TranslationSettings {
     apiBaseUrl: normalizeBaseUrl(config.get('apiBaseUrl', 'https://api.openai.com/v1')),
     model: config.get('model', 'gpt-4o-mini').trim(),
     temperature: clampNumber(config.get('temperature', 0.2), 0, 2),
-    maxChunkChars: clampNumber(config.get('maxChunkChars', 6000), 1000, 20000),
-    maxResponseTokens: clampNumber(config.get('maxResponseTokens', 4000), 256, 64000),
+    maxChunkChars: clampNumber(config.get('maxChunkChars', 20000), 1000, 20000),
+    maxSegmentsPerChunk: clampNumber(config.get('maxSegmentsPerChunk', 40), 1, 200),
+    maxResponseTokens: clampNumber(config.get('maxResponseTokens', 64000), 256, 64000),
     targetLanguage: config.get('targetLanguage', 'Simplified Chinese').trim(),
     requestTimeoutMs: clampNumber(config.get('requestTimeoutMs', 60000), 5000, 300000),
-    useJsonResponseFormat: config.get('useJsonResponseFormat', false)
+    useJsonResponseFormat: config.get('useJsonResponseFormat', false),
+    disableThinking: config.get('disableThinking', true)
   }
 }
 

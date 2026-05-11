@@ -76,10 +76,12 @@ describe('extension contributions', () => {
         model: 'gpt-test',
         temperature: 0.2,
         maxChunkChars: 6000,
+        maxSegmentsPerChunk: 40,
         maxResponseTokens: 4000,
         targetLanguage: 'Simplified Chinese',
         requestTimeoutMs: 1000,
-        useJsonResponseFormat: false
+        useJsonResponseFormat: false,
+        disableThinking: true
       }),
       getApiKey: async () => 'test-key',
       promptAndStoreApiKey: async () => undefined,
@@ -126,9 +128,14 @@ describe('extension contributions', () => {
       { id: 's3', text: 'Third paragraph.' }
     ]
     const progressReports: Array<{ message?: string; increment?: number }> = []
+    let now = 0
 
     const dependencies = createSingleSegmentTranslationDependencies({
       readFile: async () => Buffer.from(segments.map(segment => segment.text).join('\n\n')),
+      now: () => {
+        now += 1000
+        return now
+      },
       withProgress: async (_options, task) => task({
         report(update) {
           progressReports.push(update)
@@ -153,9 +160,9 @@ describe('extension contributions', () => {
     const increment = 100 / 3
     assert.deepEqual(progressReports, [
       { message: '0 of 3 chunks complete' },
-      { message: '1 of 3 chunks complete', increment },
-      { message: '2 of 3 chunks complete', increment },
-      { message: '3 of 3 chunks complete', increment },
+      { message: '1 of 3 chunks complete (1.0s for Chunk 1 of 3)', increment },
+      { message: '2 of 3 chunks complete (1.0s for Chunk 2 of 3)', increment },
+      { message: '3 of 3 chunks complete (1.0s for Chunk 3 of 3)', increment },
       { message: 'Applying translations' }
     ])
 
@@ -186,10 +193,12 @@ describe('extension contributions', () => {
         model: 'gpt-test',
         temperature: 0.2,
         maxChunkChars: 6000,
+        maxSegmentsPerChunk: 40,
         maxResponseTokens: 4000,
         targetLanguage: 'Simplified Chinese',
         requestTimeoutMs: 1000,
-        useJsonResponseFormat: false
+        useJsonResponseFormat: false,
+        disableThinking: true
       }),
       getApiKey: async () => 'test-key',
       promptAndStoreApiKey: async () => undefined,
@@ -235,6 +244,65 @@ describe('extension contributions', () => {
     assert.equal(diffOpened, true)
   })
 
+  it('reports retry and single-segment recovery progress', async () => {
+    const segments = [
+      { id: 's1', text: 'First paragraph.' },
+      { id: 's2', text: 'Second paragraph.' }
+    ]
+    const providerFailure = new TranslationClientError('Provider returned invalid JSON: broken')
+    const progressMessages: string[] = []
+    let failedBatchAttempts = 0
+    let now = 0
+
+    const dependencies = createSingleSegmentTranslationDependencies({
+      readFile: async () => Buffer.from('original markdown'),
+      now: () => {
+        now += 1000
+        return now
+      },
+      withProgress: async (_options, task) => task({
+        report(update) {
+          if (update.message) {
+            progressMessages.push(update.message)
+          }
+        }
+      }, { isCancellationRequested: false } as vscode.CancellationToken),
+      parseMarkdownSegments: () => ({
+        tokens: segments.map(segment => ({ kind: 'segment' as const, id: segment.id, original: segment.text })),
+        segments
+      }),
+      createTranslationBatches: batchSegments => [batchSegments],
+      translateSegmentsWithOpenAI: async (_options, batchSegments) => {
+        if (batchSegments.length > 1 && failedBatchAttempts < 2) {
+          failedBatchAttempts += 1
+          throw providerFailure
+        }
+
+        return new Map(batchSegments.map(segment => [segment.id, `译文-${segment.id}`]))
+      },
+      applyTranslations: (_parsed, translations) => segments.map(segment => translations.get(segment.id)).join('\n')
+    })
+
+    await translateMarkdownToChinese(
+      { secrets: { get: async () => 'test-key' } } as unknown as vscode.ExtensionContext,
+      new TranslatedMarkdownContentProvider(),
+      vscode.Uri.file('/tmp/doc.md'),
+      dependencies
+    )
+
+    assert.deepEqual(progressMessages, [
+      '0 of 1 chunks complete',
+      'Chunk 1 of 1: retrying after Provider returned invalid JSON: broken',
+      'Chunk 1 of 1: recovering one segment at a time after Provider returned invalid JSON: broken',
+      'Chunk 1 of 1: recovery segment 1 of 2',
+      'Chunk 1 of 1: recovery segment 2 of 2',
+      '1 of 1 chunks complete (1.0s for Chunk 1 of 1)',
+      'Applying translations'
+    ])
+
+    discardLastPendingMarkdownTranslation()
+  })
+
   it('reports the isolated segment id when fallback translation still fails', async () => {
     const segments = [
       { id: 's1', text: 'First paragraph.' },
@@ -257,10 +325,12 @@ describe('extension contributions', () => {
         model: 'gpt-test',
         temperature: 0.2,
         maxChunkChars: 6000,
+        maxSegmentsPerChunk: 40,
         maxResponseTokens: 4000,
         targetLanguage: 'Simplified Chinese',
         requestTimeoutMs: 1000,
-        useJsonResponseFormat: false
+        useJsonResponseFormat: false,
+        disableThinking: true
       }),
       getApiKey: async () => 'test-key',
       promptAndStoreApiKey: async () => undefined,
@@ -320,6 +390,42 @@ describe('extension contributions', () => {
 
     assert.ok(statusBarItems.items.some(item => item.text === '$(check) Replace Translation' && item.command === 'mdTranslator.replaceLastTranslation' && item.shown))
     assert.ok(statusBarItems.items.some(item => item.text === '$(close) Discard Translation' && item.command === 'mdTranslator.discardLastTranslation' && item.shown))
+
+    discardLastPendingMarkdownTranslation()
+  })
+
+  it('clears previous pending translation actions when a new translation starts', async () => {
+    let sourceText = '# hello\n'
+    const statusBarItems = createStatusBarItems()
+
+    const dependencies = createSingleSegmentTranslationDependencies({
+      readFile: async () => Buffer.from(sourceText),
+      createStatusBarItem: () => statusBarItems.create()
+    })
+
+    await translateMarkdownToChinese(
+      { secrets: { get: async () => 'test-key' } } as unknown as vscode.ExtensionContext,
+      new TranslatedMarkdownContentProvider(),
+      vscode.Uri.file('/tmp/doc.md'),
+      dependencies
+    )
+
+    const firstReplaceAction = statusBarItems.items.find(item => item.text === '$(check) Replace Translation')
+    const firstDiscardAction = statusBarItems.items.find(item => item.text === '$(close) Discard Translation')
+    assert.ok(firstReplaceAction?.shown)
+    assert.ok(firstDiscardAction?.shown)
+
+    sourceText = '# hello again\n'
+
+    await translateMarkdownToChinese(
+      { secrets: { get: async () => 'test-key' } } as unknown as vscode.ExtensionContext,
+      new TranslatedMarkdownContentProvider(),
+      vscode.Uri.file('/tmp/doc.md'),
+      dependencies
+    )
+
+    assert.equal(firstReplaceAction.disposed, true)
+    assert.equal(firstDiscardAction.disposed, true)
 
     discardLastPendingMarkdownTranslation()
   })
@@ -444,10 +550,12 @@ function createSingleSegmentTranslationDependencies(
       model: 'gpt-test',
       temperature: 0.2,
       maxChunkChars: 6000,
+      maxSegmentsPerChunk: 40,
       maxResponseTokens: 4000,
       targetLanguage: 'Simplified Chinese',
       requestTimeoutMs: 1000,
-      useJsonResponseFormat: false
+      useJsonResponseFormat: false,
+      disableThinking: true
     }),
     getApiKey: async () => 'test-key',
     promptAndStoreApiKey: async () => undefined,

@@ -1,5 +1,5 @@
 import { strict as assert } from 'assert'
-import { decodeAssistantContent, parseTranslationResponse, TranslationClientError } from '../openaiClient'
+import { applyDisableThinkingHint, decodeAssistantContent, parseTranslationResponse, TranslationClientError } from '../openaiClient'
 
 describe('openaiClient', () => {
   it('parses valid translation JSON from plain content', () => {
@@ -82,5 +82,60 @@ describe('openaiClient', () => {
     const translations = parseTranslationResponse(content, ['s1'])
 
     assert.equal(translations.get('s1'), '你好')
+  })
+
+  it('adds the DeepSeek thinking disable hint when configured', () => {
+    const requestBody: Record<string, unknown> = {}
+
+    applyDisableThinkingHint(requestBody, {
+      apiBaseUrl: 'https://api.deepseek.com/v1',
+      model: 'deepseek-v4-flash'
+    })
+
+    assert.deepEqual(requestBody.thinking, { type: 'disabled' })
+  })
+
+  it('adds the Qwen thinking disable hint when configured', () => {
+    const requestBody: Record<string, unknown> = {}
+
+    applyDisableThinkingHint(requestBody, {
+      apiBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      model: 'qwen3-max'
+    })
+
+    assert.equal(requestBody.enable_thinking, false)
+  })
+
+  it('adds the OpenAI reasoning disable hint only for GPT-5.1 and newer', () => {
+    const requestBody: Record<string, unknown> = {}
+
+    applyDisableThinkingHint(requestBody, {
+      apiBaseUrl: 'https://api.openai.com/v1',
+      model: 'gpt-5.1'
+    })
+
+    assert.equal(requestBody.reasoning_effort, 'none')
+  })
+
+  it('does not add unsupported OpenAI reasoning hints to earlier reasoning models', () => {
+    const requestBody: Record<string, unknown> = {}
+
+    applyDisableThinkingHint(requestBody, {
+      apiBaseUrl: 'https://api.openai.com/v1',
+      model: 'o3-mini'
+    })
+
+    assert.deepEqual(requestBody, {})
+  })
+
+  it('does not add provider-specific thinking fields for unknown providers', () => {
+    const requestBody: Record<string, unknown> = {}
+
+    applyDisableThinkingHint(requestBody, {
+      apiBaseUrl: 'https://example.test/v1',
+      model: 'custom-flash'
+    })
+
+    assert.deepEqual(requestBody, {})
   })
 })

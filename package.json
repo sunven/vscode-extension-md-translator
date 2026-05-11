@@ -68,14 +68,21 @@
         },
         "mdTranslator.maxChunkChars": {
           "type": "number",
-          "default": 6000,
+          "default": 20000,
           "minimum": 1000,
           "maximum": 20000,
           "description": "%configuration.maxChunkChars.description%"
         },
+        "mdTranslator.maxSegmentsPerChunk": {
+          "type": "number",
+          "default": 40,
+          "minimum": 1,
+          "maximum": 200,
+          "description": "%configuration.maxSegmentsPerChunk.description%"
+        },
         "mdTranslator.maxResponseTokens": {
           "type": "number",
-          "default": 4000,
+          "default": 64000,
           "minimum": 256,
           "maximum": 64000,
           "description": "%configuration.maxResponseTokens.description%"
@@ -96,6 +103,11 @@
           "type": "boolean",
           "default": false,
           "description": "%configuration.useJsonResponseFormat.description%"
+        },
+        "mdTranslator.disableThinking": {
+          "type": "boolean",
+          "default": true,
+          "description": "%configuration.disableThinking.description%"
         }
       }
     },

@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.validateTranslatedMarkdown = exports.createTranslationBatches = exports.applyTranslations = exports.parseMarkdownSegments = void 0;
+exports.validateTranslatedMarkdown = exports.createTranslationBatches = exports.applyTranslations = exports.splitLongMarkdownSegments = exports.parseMarkdownSegments = void 0;
 const openaiClient_1 = require("./openaiClient");
 function parseMarkdownSegments(source) {
     const state = { nextSegmentNumber: 1 };
@@ -61,12 +61,35 @@ function parseMarkdownSegments(source) {
     }
     return {
         tokens,
-        segments: tokens
-            .filter((token) => token.kind === 'segment')
-            .map(token => ({ id: token.id, text: token.original }))
+        segments: collectSegments(tokens)
     };
 }
 exports.parseMarkdownSegments = parseMarkdownSegments;
+function splitLongMarkdownSegments(parsed, maxSegmentChars) {
+    if (maxSegmentChars <= 0) {
+        return parsed;
+    }
+    const tokens = [];
+    for (const token of parsed.tokens) {
+        if (token.kind === 'raw' || token.original.length <= maxSegmentChars) {
+            tokens.push(token);
+            continue;
+        }
+        const parts = splitTextByMaxChars(token.original, maxSegmentChars);
+        for (let index = 0; index < parts.length; index += 1) {
+            tokens.push({
+                kind: 'segment',
+                id: `${token.id}p${index + 1}`,
+                original: parts[index]
+            });
+        }
+    }
+    return {
+        tokens,
+        segments: collectSegments(tokens)
+    };
+}
+exports.splitLongMarkdownSegments = splitLongMarkdownSegments;
 function applyTranslations(parsed, translations) {
     return parsed.tokens.map(token => {
         if (token.kind === 'raw') {
@@ -227,6 +250,35 @@ function pushSegment(tokens, text, state) {
     const id = `s${state.nextSegmentNumber}`;
     state.nextSegmentNumber += 1;
     tokens.push({ kind: 'segment', id, original: text });
+}
+function collectSegments(tokens) {
+    return tokens
+        .filter((token) => token.kind === 'segment')
+        .map(token => ({ id: token.id, text: token.original }));
+}
+function splitTextByMaxChars(text, maxChars) {
+    const parts = [];
+    let start = 0;
+    while (start < text.length) {
+        let end = Math.min(start + maxChars, text.length);
+        if (end < text.length) {
+            end = findReadableSplitPoint(text, start, end, maxChars);
+        }
+        parts.push(text.slice(start, end));
+        start = end;
+    }
+    return parts;
+}
+function findReadableSplitPoint(text, start, preferredEnd, maxChars) {
+    const minimumUsefulSize = Math.floor(maxChars * 0.6);
+    for (const delimiter of ['. ', '! ', '? ', '; ', ': ', ', ', ' ']) {
+        const delimiterIndex = text.lastIndexOf(delimiter, preferredEnd);
+        const end = delimiterIndex === -1 ? -1 : delimiterIndex + delimiter.length;
+        if (end > start + minimumUsefulSize && end <= preferredEnd) {
+            return end;
+        }
+    }
+    return preferredEnd;
 }
 function pushRaw(tokens, text) {
     if (!text) {

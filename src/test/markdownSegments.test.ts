@@ -3,6 +3,7 @@ import {
   applyTranslations,
   createTranslationBatches,
   parseMarkdownSegments,
+  splitLongMarkdownSegments,
   validateTranslatedMarkdown
 } from '../markdownSegments'
 
@@ -70,6 +71,36 @@ describe('markdownSegments', () => {
       [segments[0], segments[1]],
       [segments[2]]
     ])
+  })
+
+  it('allows larger batches for many short segments', () => {
+    const segments = Array.from({ length: 240 }, (_, index) => ({
+      id: `s${index + 1}`,
+      text: 'Short sentence.'
+    }))
+
+    assert.equal(createTranslationBatches(segments, 6000).length, 6)
+    assert.equal(createTranslationBatches(segments, 6000, 120).length, 2)
+    assert.equal(createTranslationBatches(segments, 2000, 120).length, 2)
+  })
+
+  it('splits oversized Markdown segments before batching', () => {
+    const source = [
+      'Intro',
+      '',
+      'This paragraph stays on one Markdown line and should still be split into bounded translation segments before it reaches the provider.'
+    ].join('\n')
+    const parsed = splitLongMarkdownSegments(parseMarkdownSegments(source), 40)
+
+    assert.ok(parsed.segments.length > 2)
+    assert.ok(parsed.segments.every(segment => segment.text.length <= 40))
+    assert.ok(createTranslationBatches(parsed.segments, 40).every(batch => (
+      batch.reduce((total, segment) => total + segment.text.length, 0) <= 40
+    )))
+    assert.equal(
+      applyTranslations(parsed, new Map(parsed.segments.map(segment => [segment.id, segment.text]))),
+      source
+    )
   })
 
   it('reports validation errors when protected structures change', () => {

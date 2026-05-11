@@ -22,11 +22,13 @@
      "mdTranslator.apiBaseUrl": "https://api.openai.com/v1",
      "mdTranslator.model": "gpt-4o-mini",
      "mdTranslator.temperature": 0.2,
-     "mdTranslator.maxChunkChars": 6000,
-     "mdTranslator.maxResponseTokens": 4000,
+     "mdTranslator.maxChunkChars": 20000,
+     "mdTranslator.maxSegmentsPerChunk": 40,
+     "mdTranslator.maxResponseTokens": 64000,
      "mdTranslator.targetLanguage": "Simplified Chinese",
      "mdTranslator.requestTimeoutMs": 60000,
-     "mdTranslator.useJsonResponseFormat": false
+     "mdTranslator.useJsonResponseFormat": false,
+     "mdTranslator.disableThinking": true
    }
    ```
 

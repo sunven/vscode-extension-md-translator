@@ -1,7 +1,7 @@
 import * as path from 'path'
 import * as vscode from 'vscode'
 import { getApiKey, promptAndStoreApiKey, readTranslationSettings } from './config'
-import { createTranslationBatches, parseMarkdownSegments, applyTranslations, validateTranslatedMarkdown } from './markdownSegments'
+import { createTranslationBatches, parseMarkdownSegments, applyTranslations, splitLongMarkdownSegments, validateTranslatedMarkdown } from './markdownSegments'
 import { TranslationClientError, TranslationSegmentInput, translateSegmentsWithOpenAI } from './openaiClient'
 
 const replaceSourceAction = 'Replace Source'
@@ -58,10 +58,12 @@ export interface MarkdownTranslationDependencies {
   ): Thenable<R>
   executeCommand(command: string, ...rest: unknown[]): Thenable<unknown>
   parseMarkdownSegments: typeof parseMarkdownSegments
+  splitLongMarkdownSegments?: typeof splitLongMarkdownSegments
   createTranslationBatches: typeof createTranslationBatches
   translateSegmentsWithOpenAI: typeof translateSegmentsWithOpenAI
   applyTranslations: typeof applyTranslations
   validateTranslatedMarkdown: typeof validateTranslatedMarkdown
+  now?: () => number
 }
 
 const defaultMarkdownTranslationDependencies: MarkdownTranslationDependencies = {
@@ -77,10 +79,12 @@ const defaultMarkdownTranslationDependencies: MarkdownTranslationDependencies = 
   withProgress: (options, task) => vscode.window.withProgress(options, task),
   executeCommand: (command, ...rest) => vscode.commands.executeCommand(command, ...rest),
   parseMarkdownSegments,
+  splitLongMarkdownSegments,
   createTranslationBatches,
   translateSegmentsWithOpenAI,
   applyTranslations,
-  validateTranslatedMarkdown
+  validateTranslatedMarkdown,
+  now: () => Date.now()
 }
 
 export async function translateMarkdownToChinese(
@@ -120,17 +124,21 @@ export async function translateMarkdownToChinese(
 
   const originalBytes = await dependencies.readFile(sourceUri)
   const originalText = Buffer.from(originalBytes).toString('utf8')
-  const parsed = dependencies.parseMarkdownSegments(originalText)
+  const parsed = (dependencies.splitLongMarkdownSegments ?? splitLongMarkdownSegments)(
+    dependencies.parseMarkdownSegments(originalText),
+    settings.maxChunkChars
+  )
 
   if (parsed.segments.length === 0) {
     await dependencies.showInformationMessage('No English prose segments found to translate.')
     return
   }
 
-  const batches = dependencies.createTranslationBatches(parsed.segments, settings.maxChunkChars)
+  const batches = dependencies.createTranslationBatches(parsed.segments, settings.maxChunkChars, settings.maxSegmentsPerChunk)
   const translations = new Map<string, string>()
   let translatedText = ''
   const loading = dependencies.createStatusBarItem(vscode.StatusBarAlignment.Left, 100)
+  discardPendingMarkdownTranslation()
   loading.text = '$(sync~spin) Translating Markdown to Chinese'
   loading.tooltip = 'Markdown translation is running'
   loading.show()
@@ -147,6 +155,7 @@ export async function translateMarkdownToChinese(
         cancellationToken,
         dependencies,
         loading,
+        now: dependencies.now ?? Date.now,
         progress,
         settings,
         translations
@@ -173,6 +182,7 @@ export async function translateMarkdownToChinese(
           cancellationToken,
           dependencies,
           loading,
+          now: dependencies.now ?? Date.now,
           progress,
           settings: {
             ...settings,
@@ -261,11 +271,12 @@ async function translateBatchesIntoMap(args: {
   cancellationToken: vscode.CancellationToken
   dependencies: Pick<MarkdownTranslationDependencies, 'translateSegmentsWithOpenAI'>
   loading: vscode.StatusBarItem
+  now: () => number
   progress: vscode.Progress<{ message?: string; increment?: number }>
   settings: ReturnType<typeof readTranslationSettings>
   translations: Map<string, string>
 }): Promise<void> {
-  const { apiKey, attemptLabel, batches, cancellationToken, dependencies, loading, progress, settings, translations } = args
+  const { apiKey, attemptLabel, batches, cancellationToken, dependencies, loading, now, progress, settings, translations } = args
   const progressIncrement = 100 / batches.length
 
   progress.report({ message: `0 of ${batches.length} chunks complete` })
@@ -281,6 +292,7 @@ async function translateBatchesIntoMap(args: {
 
     const batch = batches[index]
     let batchTranslations: Map<string, string>
+    const startedAt = now()
 
     try {
       batchTranslations = await translateBatchWithRecovery(
@@ -289,7 +301,27 @@ async function translateBatchesIntoMap(args: {
           ...settings,
           apiKey
         },
-        batch
+        batch,
+        {
+          onRetry: error => {
+            const message = `${chunkLabel}: retrying after ${summarizeTranslationError(error)}`
+            loading.text = `$(sync~spin) ${chunkLabel} (retrying)`
+            loading.tooltip = message
+            progress.report({ message })
+          },
+          onSingleSegmentFallbackStart: error => {
+            const message = `${chunkLabel}: recovering one segment at a time after ${summarizeTranslationError(error)}`
+            loading.text = `$(sync~spin) ${chunkLabel} (recovering)`
+            loading.tooltip = message
+            progress.report({ message })
+          },
+          onSingleSegmentFallbackProgress: (segmentIndex, segmentCount) => {
+            const message = `${chunkLabel}: recovery segment ${segmentIndex + 1} of ${segmentCount}`
+            loading.text = `$(sync~spin) ${chunkLabel} recovery ${segmentIndex + 1}/${segmentCount}`
+            loading.tooltip = message
+            progress.report({ message })
+          }
+        }
       )
     } catch (error) {
       throw buildBatchTranslationError(error, index, batches.length, batch)
@@ -300,7 +332,7 @@ async function translateBatchesIntoMap(args: {
     }
 
     progress.report({
-      message: `${index + 1} of ${batches.length} chunks complete`,
+      message: `${index + 1} of ${batches.length} chunks complete (${formatDuration(now() - startedAt)} for ${chunkLabel})`,
       increment: progressIncrement
     })
   }
@@ -371,11 +403,14 @@ function buildValidationFailureMessage(errors: string[]): string {
 async function translateBatchWithRecovery(
   translateSegments: typeof translateSegmentsWithOpenAI,
   options: Parameters<typeof translateSegmentsWithOpenAI>[0],
-  segments: TranslationSegmentInput[]
+  segments: TranslationSegmentInput[],
+  reporter?: TranslationRecoveryReporter
 ): Promise<Map<string, string>> {
   try {
     return await translateSegments(options, segments)
-  } catch {
+  } catch (firstError) {
+    reporter?.onRetry(firstError)
+
     try {
       return await translateSegments(options, segments)
     } catch (retryError) {
@@ -383,10 +418,13 @@ async function translateBatchWithRecovery(
         throw retryError
       }
 
+      reporter?.onSingleSegmentFallbackStart(retryError)
       const recovered = new Map<string, string>()
 
-      for (const segment of segments) {
+      for (let index = 0; index < segments.length; index += 1) {
+        const segment = segments[index]
         let segmentTranslations: Map<string, string>
+        reporter?.onSingleSegmentFallbackProgress(index, segments.length)
 
         try {
           segmentTranslations = await translateSegments(options, [segment])
@@ -402,6 +440,28 @@ async function translateBatchWithRecovery(
       return recovered
     }
   }
+}
+
+interface TranslationRecoveryReporter {
+  onRetry(error: unknown): void
+  onSingleSegmentFallbackStart(error: unknown): void
+  onSingleSegmentFallbackProgress(segmentIndex: number, segmentCount: number): void
+}
+
+function summarizeTranslationError(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return 'an unknown provider error'
+  }
+
+  return error.message.length > 120 ? `${error.message.slice(0, 117)}...` : error.message
+}
+
+function formatDuration(milliseconds: number): string {
+  if (milliseconds < 1000) {
+    return `${Math.max(0, Math.round(milliseconds))}ms`
+  }
+
+  return `${(milliseconds / 1000).toFixed(1)}s`
 }
 
 function canRecoverBySingleSegmentFallback(error: unknown, segments: TranslationSegmentInput[]): boolean {

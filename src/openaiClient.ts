@@ -12,6 +12,7 @@ export interface OpenAITranslationOptions {
   maxResponseTokens: number
   requestTimeoutMs: number
   useJsonResponseFormat: boolean
+  disableThinking: boolean
 }
 
 export class TranslationClientError extends Error {
@@ -60,6 +61,10 @@ export async function translateSegmentsWithOpenAI(
     requestBody.response_format = { type: 'json_object' }
   }
 
+  if (options.disableThinking) {
+    applyDisableThinkingHint(requestBody, options)
+  }
+
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), options.requestTimeoutMs)
 
@@ -98,6 +103,24 @@ export async function translateSegmentsWithOpenAI(
     throw new TranslationClientError(error instanceof Error ? error.message : 'Unknown provider error.')
   } finally {
     clearTimeout(timeout)
+  }
+}
+
+export function applyDisableThinkingHint(requestBody: Record<string, unknown>, options: Pick<OpenAITranslationOptions, 'apiBaseUrl' | 'model'>): void {
+  const provider = detectThinkingControlProvider(options)
+
+  if (provider === 'deepseek') {
+    requestBody.thinking = { type: 'disabled' }
+    return
+  }
+
+  if (provider === 'qwen') {
+    requestBody.enable_thinking = false
+    return
+  }
+
+  if (provider === 'openai-reasoning') {
+    requestBody.reasoning_effort = 'none'
   }
 }
 
@@ -248,6 +271,33 @@ function looksLikeEventStream(contentType: string | null | undefined, responseTe
   }
 
   return /^\s*data:\s/m.test(responseText)
+}
+
+function detectThinkingControlProvider(options: Pick<OpenAITranslationOptions, 'apiBaseUrl' | 'model'>): 'deepseek' | 'qwen' | 'openai-reasoning' | undefined {
+  const baseUrl = options.apiBaseUrl.toLowerCase()
+  const model = options.model.toLowerCase()
+
+  if (baseUrl.includes('deepseek') || model.includes('deepseek')) {
+    return 'deepseek'
+  }
+
+  if (
+    baseUrl.includes('dashscope') ||
+    baseUrl.includes('aliyuncs') ||
+    baseUrl.includes('alibabacloud') ||
+    model.includes('qwen')
+  ) {
+    return 'qwen'
+  }
+
+  if (
+    baseUrl.includes('api.openai.com') &&
+    /^gpt-5\.[1-9]/.test(model)
+  ) {
+    return 'openai-reasoning'
+  }
+
+  return undefined
 }
 
 function extractProviderMessage(responseText: string): string | undefined {

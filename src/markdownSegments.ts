@@ -101,9 +101,37 @@ export function parseMarkdownSegments(source: string): ParsedMarkdown {
 
   return {
     tokens,
-    segments: tokens
-      .filter((token): token is Extract<MarkdownToken, { kind: 'segment' }> => token.kind === 'segment')
-      .map(token => ({ id: token.id, text: token.original }))
+    segments: collectSegments(tokens)
+  }
+}
+
+export function splitLongMarkdownSegments(parsed: ParsedMarkdown, maxSegmentChars: number): ParsedMarkdown {
+  if (maxSegmentChars <= 0) {
+    return parsed
+  }
+
+  const tokens: MarkdownToken[] = []
+
+  for (const token of parsed.tokens) {
+    if (token.kind === 'raw' || token.original.length <= maxSegmentChars) {
+      tokens.push(token)
+      continue
+    }
+
+    const parts = splitTextByMaxChars(token.original, maxSegmentChars)
+
+    for (let index = 0; index < parts.length; index += 1) {
+      tokens.push({
+        kind: 'segment',
+        id: `${token.id}p${index + 1}`,
+        original: parts[index]
+      })
+    }
+  }
+
+  return {
+    tokens,
+    segments: collectSegments(tokens)
   }
 }
 
@@ -311,6 +339,45 @@ function pushSegment(tokens: MarkdownToken[], text: string, state: ParseState): 
   const id = `s${state.nextSegmentNumber}`
   state.nextSegmentNumber += 1
   tokens.push({ kind: 'segment', id, original: text })
+}
+
+function collectSegments(tokens: MarkdownToken[]): TranslationSegmentInput[] {
+  return tokens
+    .filter((token): token is Extract<MarkdownToken, { kind: 'segment' }> => token.kind === 'segment')
+    .map(token => ({ id: token.id, text: token.original }))
+}
+
+function splitTextByMaxChars(text: string, maxChars: number): string[] {
+  const parts: string[] = []
+  let start = 0
+
+  while (start < text.length) {
+    let end = Math.min(start + maxChars, text.length)
+
+    if (end < text.length) {
+      end = findReadableSplitPoint(text, start, end, maxChars)
+    }
+
+    parts.push(text.slice(start, end))
+    start = end
+  }
+
+  return parts
+}
+
+function findReadableSplitPoint(text: string, start: number, preferredEnd: number, maxChars: number): number {
+  const minimumUsefulSize = Math.floor(maxChars * 0.6)
+
+  for (const delimiter of ['. ', '! ', '? ', '; ', ': ', ', ', ' ']) {
+    const delimiterIndex = text.lastIndexOf(delimiter, preferredEnd)
+    const end = delimiterIndex === -1 ? -1 : delimiterIndex + delimiter.length
+
+    if (end > start + minimumUsefulSize && end <= preferredEnd) {
+      return end
+    }
+  }
+
+  return preferredEnd
 }
 
 function pushRaw(tokens: MarkdownToken[], text: string): void {

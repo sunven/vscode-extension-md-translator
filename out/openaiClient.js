@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.decodeAssistantContent = exports.parseTranslationResponse = exports.translateSegmentsWithOpenAI = exports.TranslationClientError = void 0;
+exports.decodeAssistantContent = exports.parseTranslationResponse = exports.applyDisableThinkingHint = exports.translateSegmentsWithOpenAI = exports.TranslationClientError = void 0;
 class TranslationClientError extends Error {
     status;
     constructor(message, status) {
@@ -43,6 +43,9 @@ async function translateSegmentsWithOpenAI(options, segments) {
     if (options.useJsonResponseFormat) {
         requestBody.response_format = { type: 'json_object' };
     }
+    if (options.disableThinking) {
+        applyDisableThinkingHint(requestBody, options);
+    }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), options.requestTimeoutMs);
     try {
@@ -77,6 +80,21 @@ async function translateSegmentsWithOpenAI(options, segments) {
     }
 }
 exports.translateSegmentsWithOpenAI = translateSegmentsWithOpenAI;
+function applyDisableThinkingHint(requestBody, options) {
+    const provider = detectThinkingControlProvider(options);
+    if (provider === 'deepseek') {
+        requestBody.thinking = { type: 'disabled' };
+        return;
+    }
+    if (provider === 'qwen') {
+        requestBody.enable_thinking = false;
+        return;
+    }
+    if (provider === 'openai-reasoning') {
+        requestBody.reasoning_effort = 'none';
+    }
+}
+exports.applyDisableThinkingHint = applyDisableThinkingHint;
 function parseTranslationResponse(content, expectedIds) {
     const jsonText = extractJsonObjectText(content);
     let parsed;
@@ -188,6 +206,24 @@ function looksLikeEventStream(contentType, responseText) {
         return true;
     }
     return /^\s*data:\s/m.test(responseText);
+}
+function detectThinkingControlProvider(options) {
+    const baseUrl = options.apiBaseUrl.toLowerCase();
+    const model = options.model.toLowerCase();
+    if (baseUrl.includes('deepseek') || model.includes('deepseek')) {
+        return 'deepseek';
+    }
+    if (baseUrl.includes('dashscope') ||
+        baseUrl.includes('aliyuncs') ||
+        baseUrl.includes('alibabacloud') ||
+        model.includes('qwen')) {
+        return 'qwen';
+    }
+    if (baseUrl.includes('api.openai.com') &&
+        /^gpt-5\.[1-9]/.test(model)) {
+        return 'openai-reasoning';
+    }
+    return undefined;
 }
 function extractProviderMessage(responseText) {
     try {

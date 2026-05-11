@@ -9,8 +9,10 @@
   "configuration.model.description": "用于 Markdown 翻译的模型。",
   "configuration.temperature.description": "翻译请求的采样温度。",
   "configuration.maxChunkChars.description": "每个翻译批次允许的最大源文本字符数。",
+  "configuration.maxSegmentsPerChunk.description": "每个翻译批次允许的最大 Markdown 自然语言片段数。数值越低越慢，但能减少服务返回错误 segment id 的概率。",
   "configuration.maxResponseTokens.description": "每次翻译请求允许的最大响应 token 数。",
   "configuration.targetLanguage.description": "Markdown 翻译的目标语言。",
   "configuration.requestTimeoutMs.description": "每次 OpenAI 兼容 API 请求的超时时间，单位为毫秒。",
-  "configuration.useJsonResponseFormat.description": "向支持 OpenAI JSON mode 的服务发送 response_format={\"type\":\"json_object\"}。"
+  "configuration.useJsonResponseFormat.description": "向支持 OpenAI JSON mode 的服务发送 response_format={\"type\":\"json_object\"}。",
+  "configuration.disableThinking.description": "当配置的服务支持已知 OpenAI 兼容控制参数时，为翻译请求禁用模型 thinking/reasoning。"
 }
