@@ -5,7 +5,6 @@ import * as vscode from 'vscode'
 import {
   discardLastPendingMarkdownTranslation,
   MarkdownTranslationDependencies,
-  replaceLastPendingMarkdownTranslation,
   TranslatedMarkdownContentProvider,
   translateMarkdownToChinese
 } from '../translateMarkdown'
@@ -59,6 +58,7 @@ describe('extension contributions', () => {
 
   it('shows a loading status while translating Markdown', async () => {
     const calls: Array<{ type: string; value?: string }> = []
+    const webviewPanels = createWebviewPanels()
     const statusBarItem = {
       text: '',
       tooltip: '',
@@ -97,6 +97,7 @@ describe('extension contributions', () => {
         show() {},
         dispose() {}
       } as vscode.StatusBarItem,
+      createWebviewPanel: (viewType, title, showOptions, options) => webviewPanels.create(viewType, title, showOptions, options),
       withProgress: async (_options, task) => task({ report() {} }, { isCancellationRequested: false } as vscode.CancellationToken),
       executeCommand: async () => undefined,
       parseMarkdownSegments: () => ({
@@ -178,7 +179,7 @@ describe('extension contributions', () => {
     const translateCallSizes: number[] = []
     const providerFailure = new TranslationClientError('Provider returned conflicting translation for segment id: s2')
     let failedBatchAttempts = 0
-    let diffOpened = false
+    const webviewPanels = createWebviewPanels()
 
     const statusBarItem = {
       text: '',
@@ -208,12 +209,9 @@ describe('extension contributions', () => {
       showInformationMessage: async () => undefined,
       showErrorMessage: async () => undefined,
       createStatusBarItem: () => statusBarItem,
+      createWebviewPanel: (viewType, title, showOptions, options) => webviewPanels.create(viewType, title, showOptions, options),
       withProgress: async (_options, task) => task({ report() {} }, { isCancellationRequested: false } as vscode.CancellationToken),
-      executeCommand: async command => {
-        if (command === 'vscode.diff') {
-          diffOpened = true
-        }
-      },
+      executeCommand: async () => undefined,
       parseMarkdownSegments: () => ({
         tokens: segments.map(segment => ({ kind: 'segment' as const, id: segment.id, original: segment.text })),
         segments
@@ -241,7 +239,7 @@ describe('extension contributions', () => {
     )
 
     assert.deepEqual(translateCallSizes, [3, 3, 1, 1, 1])
-    assert.equal(diffOpened, true)
+    assert.equal(webviewPanels.panels.length, 1)
   })
 
   it('reports retry and single-segment recovery progress', async () => {
@@ -311,6 +309,7 @@ describe('extension contributions', () => {
     const batchFailure = new TranslationClientError('Provider returned conflicting translation for segment id: s2')
     const segmentFailure = new TranslationClientError('Provider response is missing segment id: s2')
     let failedBatchAttempts = 0
+    const webviewPanels = createWebviewPanels()
 
     const statusBarItem = {
       text: '',
@@ -340,6 +339,7 @@ describe('extension contributions', () => {
       showInformationMessage: async () => undefined,
       showErrorMessage: async () => undefined,
       createStatusBarItem: () => statusBarItem,
+      createWebviewPanel: (viewType, title, showOptions, options) => webviewPanels.create(viewType, title, showOptions, options),
       withProgress: async (_options, task) => task({ report() {} }, { isCancellationRequested: false } as vscode.CancellationToken),
       executeCommand: async () => undefined,
       parseMarkdownSegments: () => ({
@@ -374,11 +374,13 @@ describe('extension contributions', () => {
     )
   })
 
-  it('shows status bar actions for a pending translated Markdown diff', async () => {
-    const statusBarItems = createStatusBarItems()
+  it('shows a translation-only preview webview with bottom-right replace and discard actions', async () => {
+    const webviewPanels = createWebviewPanels()
 
     const dependencies = createSingleSegmentTranslationDependencies({
-      createStatusBarItem: () => statusBarItems.create()
+      readFile: async () => Buffer.from('# hello <world>\n'),
+      applyTranslations: () => '# 你好 <世界>\n',
+      createWebviewPanel: (viewType, title, showOptions, options) => webviewPanels.create(viewType, title, showOptions, options)
     })
 
     await translateMarkdownToChinese(
@@ -388,19 +390,30 @@ describe('extension contributions', () => {
       dependencies
     )
 
-    assert.ok(statusBarItems.items.some(item => item.text === '$(check) Replace Translation' && item.command === 'mdTranslator.replaceLastTranslation' && item.shown))
-    assert.ok(statusBarItems.items.some(item => item.text === '$(close) Discard Translation' && item.command === 'mdTranslator.discardLastTranslation' && item.shown))
+    const panel = webviewPanels.panels[0]
+    assert.equal(panel.viewType, 'mdTranslator.translationPreview')
+    assert.equal(panel.showOptions, vscode.ViewColumn.Beside)
+    assert.equal(panel.options?.enableScripts, true)
+    assert.equal(panel.title, 'doc.md: 译文')
+    assert.match(panel.webview.html, /<div class="preview-header">译文<\/div>/)
+    assert.doesNotMatch(panel.webview.html, /# hello &lt;world&gt;/)
+    assert.match(panel.webview.html, /# 你好 &lt;世界&gt;/)
+    assert.match(panel.webview.html, /position: fixed/)
+    assert.match(panel.webview.html, /right: 24px/)
+    assert.match(panel.webview.html, /bottom: 18px/)
+    assert.match(panel.webview.html, /data-action="replace">替换/)
+    assert.match(panel.webview.html, /data-action="discard">丢弃/)
 
     discardLastPendingMarkdownTranslation()
   })
 
-  it('clears previous pending translation actions when a new translation starts', async () => {
+  it('clears the previous pending preview when a new translation starts', async () => {
     let sourceText = '# hello\n'
-    const statusBarItems = createStatusBarItems()
+    const webviewPanels = createWebviewPanels()
 
     const dependencies = createSingleSegmentTranslationDependencies({
       readFile: async () => Buffer.from(sourceText),
-      createStatusBarItem: () => statusBarItems.create()
+      createWebviewPanel: (viewType, title, showOptions, options) => webviewPanels.create(viewType, title, showOptions, options)
     })
 
     await translateMarkdownToChinese(
@@ -410,10 +423,8 @@ describe('extension contributions', () => {
       dependencies
     )
 
-    const firstReplaceAction = statusBarItems.items.find(item => item.text === '$(check) Replace Translation')
-    const firstDiscardAction = statusBarItems.items.find(item => item.text === '$(close) Discard Translation')
-    assert.ok(firstReplaceAction?.shown)
-    assert.ok(firstDiscardAction?.shown)
+    const firstPanel = webviewPanels.panels[0]
+    assert.equal(firstPanel.disposed, false)
 
     sourceText = '# hello again\n'
 
@@ -424,16 +435,16 @@ describe('extension contributions', () => {
       dependencies
     )
 
-    assert.equal(firstReplaceAction.disposed, true)
-    assert.equal(firstDiscardAction.disposed, true)
+    assert.equal(firstPanel.disposed, true)
+    assert.equal(webviewPanels.panels.length, 2)
 
     discardLastPendingMarkdownTranslation()
   })
 
-  it('replaces the source from the pending translation status bar action', async () => {
+  it('replaces the source from the pending preview action', async () => {
     let sourceText = '# hello\n'
     let writtenText: string | undefined
-    const statusBarItems = createStatusBarItems()
+    const webviewPanels = createWebviewPanels()
 
     const dependencies = createSingleSegmentTranslationDependencies({
       readFile: async () => Buffer.from(sourceText),
@@ -441,7 +452,7 @@ describe('extension contributions', () => {
         writtenText = Buffer.from(data).toString('utf8')
         sourceText = writtenText
       },
-      createStatusBarItem: () => statusBarItems.create()
+      createWebviewPanel: (viewType, title, showOptions, options) => webviewPanels.create(viewType, title, showOptions, options)
     })
 
     await translateMarkdownToChinese(
@@ -451,22 +462,49 @@ describe('extension contributions', () => {
       dependencies
     )
 
-    await replaceLastPendingMarkdownTranslation(dependencies)
+    const panel = webviewPanels.panels[0]
+    await webviewPanels.postMessage(panel, { type: 'replace' })
 
     assert.equal(writtenText, '你好')
-    assert.ok(statusBarItems.items.some(item => item.text === '$(check) Replace Translation' && item.disposed))
-    assert.ok(statusBarItems.items.some(item => item.text === '$(close) Discard Translation' && item.disposed))
+    assert.equal(panel.disposed, true)
+  })
+
+  it('discards the pending translation from the preview action', async () => {
+    let writeCalls = 0
+    const webviewPanels = createWebviewPanels()
+
+    const dependencies = createSingleSegmentTranslationDependencies({
+      writeFile: async () => {
+        writeCalls += 1
+      },
+      createWebviewPanel: (viewType, title, showOptions, options) => webviewPanels.create(viewType, title, showOptions, options)
+    })
+
+    await translateMarkdownToChinese(
+      { secrets: { get: async () => 'test-key' } } as unknown as vscode.ExtensionContext,
+      new TranslatedMarkdownContentProvider(),
+      vscode.Uri.file('/tmp/doc.md'),
+      dependencies
+    )
+
+    const panel = webviewPanels.panels[0]
+    await webviewPanels.postMessage(panel, { type: 'discard' })
+
+    assert.equal(writeCalls, 0)
+    assert.equal(panel.disposed, true)
   })
 
   it('retries when the provider returns unchanged Markdown', async () => {
     const targetLanguages: string[] = []
+    const forceTranslateValues: Array<boolean | undefined> = []
     let providerCalls = 0
-    let diffOpened = false
+    const webviewPanels = createWebviewPanels()
 
     const dependencies = createSingleSegmentTranslationDependencies({
       readFile: async () => Buffer.from('hello'),
       translateSegmentsWithOpenAI: async (options, batchSegments) => {
         targetLanguages.push(options.targetLanguage)
+        forceTranslateValues.push(options.forceTranslate)
         providerCalls += 1
 
         if (providerCalls === 1) {
@@ -475,11 +513,7 @@ describe('extension contributions', () => {
 
         return new Map(batchSegments.map(segment => [segment.id, '你好']))
       },
-      executeCommand: async command => {
-        if (command === 'vscode.diff') {
-          diffOpened = true
-        }
-      }
+      createWebviewPanel: (viewType, title, showOptions, options) => webviewPanels.create(viewType, title, showOptions, options)
     })
 
     await translateMarkdownToChinese(
@@ -490,25 +524,21 @@ describe('extension contributions', () => {
     )
 
     assert.equal(providerCalls, 2)
-    assert.equal(targetLanguages[0], 'Simplified Chinese')
-    assert.match(targetLanguages[1], /previous attempt returned unchanged source text/)
-    assert.equal(diffOpened, true)
+    assert.deepEqual(targetLanguages, ['Simplified Chinese', 'Simplified Chinese'])
+    assert.deepEqual(forceTranslateValues, [undefined, true])
+    assert.equal(webviewPanels.panels.length, 1)
 
     discardLastPendingMarkdownTranslation()
   })
 
   it('shows a specific error when unchanged Markdown persists after retry', async () => {
     let errorMessage: string | undefined
-    let diffOpened = false
+    const webviewPanels = createWebviewPanels()
 
     const dependencies = createSingleSegmentTranslationDependencies({
       readFile: async () => Buffer.from('hello'),
       translateSegmentsWithOpenAI: async (_options, batchSegments) => new Map(batchSegments.map(segment => [segment.id, segment.text])),
-      executeCommand: async command => {
-        if (command === 'vscode.diff') {
-          diffOpened = true
-        }
-      },
+      createWebviewPanel: (viewType, title, showOptions, options) => webviewPanels.create(viewType, title, showOptions, options),
       showErrorMessage: async message => {
         errorMessage = message
         return undefined
@@ -525,7 +555,7 @@ describe('extension contributions', () => {
       dependencies
     )
 
-    assert.equal(diffOpened, false)
+    assert.equal(webviewPanels.panels.length, 0)
     assert.equal(
       errorMessage,
       'Translation failed because the provider returned unchanged source text. Try a stronger translation model, lower temperature, or enable JSON response format if your provider supports it.'
@@ -543,6 +573,7 @@ function createSingleSegmentTranslationDependencies(
     show() {},
     dispose() {}
   } as vscode.StatusBarItem
+  const webviewPanels = createWebviewPanels()
 
   return {
     readTranslationSettings: () => ({
@@ -565,6 +596,7 @@ function createSingleSegmentTranslationDependencies(
     showInformationMessage: async () => undefined,
     showErrorMessage: async () => undefined,
     createStatusBarItem: () => statusBarItem,
+    createWebviewPanel: (viewType, title, showOptions, options) => webviewPanels.create(viewType, title, showOptions, options),
     withProgress: async (_options, task) => task({ report() {} }, { isCancellationRequested: false } as vscode.CancellationToken),
     executeCommand: async () => undefined,
     parseMarkdownSegments: () => ({
@@ -579,31 +611,81 @@ function createSingleSegmentTranslationDependencies(
   }
 }
 
-function createStatusBarItems(): {
-  items: Array<vscode.StatusBarItem & { shown: boolean; disposed: boolean }>
-  create(): vscode.StatusBarItem
+type WebviewMessageListener = (message: unknown) => unknown
+
+type TestWebviewPanel = vscode.WebviewPanel & {
+  disposed: boolean
+  viewType: string
+  showOptions: vscode.ViewColumn | { viewColumn: vscode.ViewColumn; preserveFocus?: boolean }
+  options?: vscode.WebviewPanelOptions & vscode.WebviewOptions
+  messageListeners: WebviewMessageListener[]
+}
+
+function createWebviewPanels(): {
+  panels: TestWebviewPanel[]
+  create(
+    viewType: string,
+    title: string,
+    showOptions: vscode.ViewColumn | { viewColumn: vscode.ViewColumn; preserveFocus?: boolean },
+    options?: vscode.WebviewPanelOptions & vscode.WebviewOptions
+  ): vscode.WebviewPanel
+  postMessage(panel: TestWebviewPanel, message: unknown): Promise<void>
 } {
-  const items: Array<vscode.StatusBarItem & { shown: boolean; disposed: boolean }> = []
+  const panels: TestWebviewPanel[] = []
 
   return {
-    items,
-    create() {
-      const item = {
-        text: '',
-        tooltip: '',
-        command: undefined,
-        shown: false,
+    panels,
+    create(viewType, title, showOptions, options) {
+      const messageListeners: WebviewMessageListener[] = []
+      const disposeListeners: Array<() => void> = []
+      const panel = {
+        viewType,
+        title,
+        showOptions,
+        options,
         disposed: false,
-        show() {
-          this.shown = true
+        active: true,
+        visible: true,
+        viewColumn: typeof showOptions === 'number' ? showOptions : showOptions.viewColumn,
+        webview: {
+          html: '',
+          options: {},
+          cspSource: 'vscode-test:',
+          asWebviewUri: (uri: vscode.Uri) => uri,
+          postMessage: async () => true,
+          onDidReceiveMessage(listener: WebviewMessageListener) {
+            messageListeners.push(listener)
+            return { dispose() {} }
+          }
         },
+        onDidDispose(listener: () => void) {
+          disposeListeners.push(listener)
+          return { dispose() {} }
+        },
+        onDidChangeViewState() {
+          return { dispose() {} }
+        },
+        reveal() {},
         dispose() {
-          this.disposed = true
-        }
-      } as vscode.StatusBarItem & { shown: boolean; disposed: boolean }
+          if (panel.disposed) {
+            return
+          }
 
-      items.push(item)
-      return item
+          panel.disposed = true
+          for (const listener of disposeListeners) {
+            listener()
+          }
+        }
+      } as unknown as TestWebviewPanel
+
+      panel.messageListeners = messageListeners
+      panels.push(panel)
+      return panel
+    },
+    async postMessage(panel, message) {
+      for (const listener of panel.messageListeners) {
+        await listener(message)
+      }
     }
   }
 }

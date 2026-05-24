@@ -1,5 +1,5 @@
 import { strict as assert } from 'assert'
-import { applyDisableThinkingHint, decodeAssistantContent, parseTranslationResponse, TranslationClientError } from '../openaiClient'
+import { applyDisableThinkingHint, decodeAssistantContent, parseTranslationResponse, translateSegmentsWithOpenAI, TranslationClientError } from '../openaiClient'
 
 describe('openaiClient', () => {
   it('parses valid translation JSON from plain content', () => {
@@ -137,5 +137,51 @@ describe('openaiClient', () => {
     })
 
     assert.deepEqual(requestBody, {})
+  })
+
+  it('adds force-translate instructions on unchanged retry requests', async () => {
+    const originalFetch = globalThis.fetch
+    let capturedBody: Record<string, unknown> | undefined
+
+    globalThis.fetch = async (_input, init) => {
+      capturedBody = JSON.parse(String(init?.body))
+
+      return new Response(JSON.stringify({
+        choices: [{
+          message: {
+            content: '{"translations":[{"id":"s1","text":"你好"}]}'
+          }
+        }]
+      }), {
+        status: 200,
+        headers: {
+          'content-type': 'application/json'
+        }
+      })
+    }
+
+    try {
+      await translateSegmentsWithOpenAI({
+        apiBaseUrl: 'https://example.test/v1',
+        apiKey: 'test-key',
+        model: 'gpt-test',
+        temperature: 0.2,
+        targetLanguage: 'Simplified Chinese',
+        maxResponseTokens: 4000,
+        requestTimeoutMs: 1000,
+        useJsonResponseFormat: false,
+        disableThinking: false,
+        forceTranslate: true
+      }, [{ id: 's1', text: 'hello' }])
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+
+    const messages = capturedBody?.messages as Array<{ role: string; content: string }>
+    const systemMessage = messages.find(message => message.role === 'system')?.content ?? ''
+
+    assert.match(systemMessage, /previous attempt returned unchanged source text/)
+    assert.match(systemMessage, /Do not copy an entire source segment/)
+    assert.match(systemMessage, /Simplified Chinese/)
   })
 })

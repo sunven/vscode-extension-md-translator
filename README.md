@@ -1,6 +1,6 @@
 # Markdown Translator
 
-一个 VS Code 扩展，用 OpenAI-compatible provider 把英文 `.md` Markdown 文件翻译为简体中文，先展示 raw Markdown diff，再由用户确认是否替换源文件。
+一个 VS Code 扩展，用 OpenAI-compatible provider 把英文 `.md` Markdown 文件翻译为简体中文，先在侧边展示 raw Markdown 译文预览，再由用户确认是否替换源文件。
 
 ## 功能特性
 
@@ -9,8 +9,8 @@
 - Markdown 翻译使用 OpenAI-compatible API，支持自定义 `baseUrl`、`model`、`temperature`、chunk 大小和超时。
 - API key 通过 VS Code SecretStorage 保存，不写入 `settings.json`。
 - 翻译前会保护 Markdown 结构，包括 Front Matter、代码块、inline code、链接目标、图片路径、HTML 注释和表格结构。
-- 翻译完成后使用 VS Code 内置 diff 编辑器展示原文和译文。
-- 只有选择 `Replace Source` 后才会覆盖源 `.md` 文件；选择 `Discard` 不会修改源文件。
+- 翻译完成后在侧边预览页展示译文，并在右下角提供 `替换` / `丢弃` 操作。
+- 只有选择 `替换` 后才会覆盖源 `.md` 文件；选择 `丢弃` 不会修改源文件。
 
 ## Markdown 翻译使用方法
 
@@ -33,8 +33,8 @@
    ```
 
 3. 打开英文 `.md` 文件，点击编辑器右上角的地球图标，或运行命令 `将 Markdown 翻译为中文` / `Translate Markdown to Chinese`。
-4. 等待翻译完成并检查 diff。
-5. 选择 `Replace Source` 覆盖源文件，或选择 `Discard` 放弃。
+4. 等待翻译完成并检查侧边译文预览。
+5. 在预览页右下角选择 `替换` 覆盖源文件，或选择 `丢弃` 放弃。
 
 隐私说明：Markdown 中需要翻译的自然语言文本会发送到你配置的 OpenAI-compatible provider。受保护的代码块、链接目标等结构会尽量不发送或不翻译，但文档内容仍可能包含敏感信息。请按你的 provider 和文档隐私要求使用。
 
@@ -101,7 +101,7 @@
 ## 注意事项
 
 - Markdown v1 只支持单个 `.md` 文件，不支持批量翻译文件夹。
-- v1 不支持 `Save As...`，译文只能在 diff 后替换源文件或丢弃。
+- v1 不支持 `Save As...`，译文只能在预览后替换源文件或丢弃。
 - 如果源文件在翻译过程中发生变化，扩展会阻止写回并要求重新运行翻译。
 
 ## 许可证

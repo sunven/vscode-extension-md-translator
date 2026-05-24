@@ -22,14 +22,7 @@ async function translateSegmentsWithOpenAI(options, segments) {
         messages: [
             {
                 role: 'system',
-                content: [
-                    'You translate Markdown prose segments.',
-                    'Return only JSON with this exact shape: {"translations":[{"id":"s1","text":"..."}]}.',
-                    'Each input segment id must appear exactly once in the translations array.',
-                    'Never repeat a segment id and never omit one.',
-                    'Preserve placeholders and markup-like text exactly if present.',
-                    'Do not add commentary, markdown code fences, or extra keys.'
-                ].join(' ')
+                content: buildTranslationSystemPrompt(options)
             },
             {
                 role: 'user',
@@ -95,6 +88,20 @@ function applyDisableThinkingHint(requestBody, options) {
     }
 }
 exports.applyDisableThinkingHint = applyDisableThinkingHint;
+function buildTranslationSystemPrompt(options) {
+    const rules = [
+        'You translate Markdown prose segments.',
+        'Return only JSON with this exact shape: {"translations":[{"id":"s1","text":"..."}]}.',
+        'Each input segment id must appear exactly once in the translations array.',
+        'Never repeat a segment id and never omit one.',
+        'Preserve placeholders and markup-like text exactly if present.',
+        'Do not add commentary, markdown code fences, or extra keys.'
+    ];
+    if (options.forceTranslate) {
+        rules.push(`The previous attempt returned unchanged source text. Translate every natural-language word into ${options.targetLanguage}.`, 'Do not copy an entire source segment as the translation.', 'Only keep brand names, file paths, URLs, code tokens, placeholders, and other non-prose literals unchanged.');
+    }
+    return rules.join(' ');
+}
 function parseTranslationResponse(content, expectedIds) {
     const jsonText = extractJsonObjectText(content);
     let parsed;

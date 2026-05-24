@@ -6,8 +6,6 @@ const vscode = require("vscode");
 const config_1 = require("./config");
 const markdownSegments_1 = require("./markdownSegments");
 const openaiClient_1 = require("./openaiClient");
-const replaceSourceAction = 'Replace Source';
-const discardAction = 'Discard';
 exports.replaceLastTranslationCommand = 'mdTranslator.replaceLastTranslation';
 exports.discardLastTranslationCommand = 'mdTranslator.discardLastTranslation';
 let pendingMarkdownTranslation;
@@ -35,6 +33,7 @@ const defaultMarkdownTranslationDependencies = {
     showInformationMessage: (message, ...items) => vscode.window.showInformationMessage(message, ...items),
     showErrorMessage: message => vscode.window.showErrorMessage(message),
     createStatusBarItem: (alignment, priority) => vscode.window.createStatusBarItem(alignment, priority),
+    createWebviewPanel: (viewType, title, showOptions, options) => vscode.window.createWebviewPanel(viewType, title, showOptions, options),
     withProgress: (options, task) => vscode.window.withProgress(options, task),
     executeCommand: (command, ...rest) => vscode.commands.executeCommand(command, ...rest),
     parseMarkdownSegments: markdownSegments_1.parseMarkdownSegments,
@@ -45,7 +44,7 @@ const defaultMarkdownTranslationDependencies = {
     validateTranslatedMarkdown: markdownSegments_1.validateTranslatedMarkdown,
     now: () => Date.now()
 };
-async function translateMarkdownToChinese(context, contentProvider, uri, dependencies = defaultMarkdownTranslationDependencies) {
+async function translateMarkdownToChinese(context, _contentProvider, uri, dependencies = defaultMarkdownTranslationDependencies) {
     const sourceUri = uri ?? vscode.window.activeTextEditor?.document.uri;
     if (!sourceUri) {
         await dependencies.showWarningMessage('Open a Markdown file or run this command from a Markdown file context.');
@@ -118,7 +117,7 @@ async function translateMarkdownToChinese(context, contentProvider, uri, depende
                     progress,
                     settings: {
                         ...settings,
-                        targetLanguage: buildStrictRetryTargetLanguage(settings.targetLanguage)
+                        forceTranslate: true
                     },
                     translations
                 });
@@ -135,25 +134,12 @@ async function translateMarkdownToChinese(context, contentProvider, uri, depende
         await dependencies.showErrorMessage(buildValidationFailureMessage(validation.errors));
         return;
     }
-    const translatedUri = createTranslatedMarkdownUri(sourceUri);
-    contentProvider.setContent(translatedUri, translatedText);
-    await dependencies.executeCommand('vscode.diff', sourceUri, translatedUri, `${path.basename(sourceUri.fsPath)}: Original ↔ Chinese translation`);
     setPendingMarkdownTranslation({
         sourceUri,
         originalText,
         translatedText,
-        replaceStatusBarItem: createPendingTranslationStatusBarItem(dependencies, '$(check) Replace Translation', 'Replace the source Markdown with the pending translation', exports.replaceLastTranslationCommand, 99),
-        discardStatusBarItem: createPendingTranslationStatusBarItem(dependencies, '$(close) Discard Translation', 'Discard the pending Markdown translation', exports.discardLastTranslationCommand, 98)
+        previewPanel: createTranslationPreviewPanel(dependencies, sourceUri, originalText, translatedText)
     });
-    const action = await dependencies.showInformationMessage('Review the Markdown diff before replacing the source file.', replaceSourceAction, discardAction);
-    if (action === discardAction) {
-        discardPendingMarkdownTranslation();
-        return;
-    }
-    if (action !== replaceSourceAction) {
-        return;
-    }
-    await replacePendingMarkdownTranslation(dependencies);
 }
 exports.translateMarkdownToChinese = translateMarkdownToChinese;
 async function replaceLastPendingMarkdownTranslation(dependencies = defaultMarkdownTranslationDependencies) {
@@ -233,23 +219,210 @@ async function replacePendingMarkdownTranslation(dependencies) {
 function setPendingMarkdownTranslation(pending) {
     discardPendingMarkdownTranslation();
     pendingMarkdownTranslation = pending;
-    pending.replaceStatusBarItem.show();
-    pending.discardStatusBarItem.show();
+    pending.previewPanel.onDidDispose(() => {
+        if (pendingMarkdownTranslation?.previewPanel === pending.previewPanel) {
+            pendingMarkdownTranslation = undefined;
+        }
+    });
 }
 function discardPendingMarkdownTranslation() {
-    pendingMarkdownTranslation?.replaceStatusBarItem.dispose();
-    pendingMarkdownTranslation?.discardStatusBarItem.dispose();
+    const pending = pendingMarkdownTranslation;
     pendingMarkdownTranslation = undefined;
+    pending?.previewPanel.dispose();
 }
-function createPendingTranslationStatusBarItem(dependencies, text, tooltip, command, priority) {
-    const item = dependencies.createStatusBarItem(vscode.StatusBarAlignment.Left, priority);
-    item.text = text;
-    item.tooltip = tooltip;
-    item.command = command;
-    return item;
+function createTranslationPreviewPanel(dependencies, sourceUri, originalText, translatedText) {
+    const title = `${path.basename(sourceUri.fsPath)}: 译文`;
+    const panel = dependencies.createWebviewPanel('mdTranslator.translationPreview', title, vscode.ViewColumn.Beside, {
+        enableScripts: true,
+        localResourceRoots: [],
+        retainContextWhenHidden: true
+    });
+    panel.webview.html = buildTranslationPreviewHtml(title, translatedText);
+    panel.webview.onDidReceiveMessage(async (message) => {
+        if (!message || typeof message !== 'object' || !('type' in message)) {
+            return;
+        }
+        const { type } = message;
+        if (type === 'replace') {
+            try {
+                await replacePendingMarkdownTranslation(dependencies);
+            }
+            catch (error) {
+                await dependencies.showErrorMessage(`Failed to replace Markdown translation: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            }
+            return;
+        }
+        if (type === 'discard') {
+            discardPendingMarkdownTranslation();
+        }
+    });
+    return panel;
 }
-function buildStrictRetryTargetLanguage(targetLanguage) {
-    return `${targetLanguage}. The previous attempt returned unchanged source text. Translate every English prose segment into ${targetLanguage}; do not copy the English source text unless it is a protected term, brand name, code token, URL, or file path.`;
+function buildTranslationPreviewHtml(title, translatedText) {
+    const nonce = createNonce();
+    const translatedLines = splitMarkdownPreviewLines(translatedText);
+    return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeHtml(title)}</title>
+  <style nonce="${nonce}">
+    :root {
+      color-scheme: light dark;
+    }
+
+    body {
+      margin: 0;
+      height: 100vh;
+      overflow: hidden;
+      color: var(--vscode-editor-foreground);
+      background: var(--vscode-editor-background);
+      font-family: var(--vscode-font-family);
+      font-size: var(--vscode-editor-font-size);
+    }
+
+    .preview {
+      height: 100vh;
+      height: 100vh;
+      overflow: auto;
+      background: var(--vscode-editor-background);
+      padding-bottom: 88px;
+      box-sizing: border-box;
+    }
+
+    .preview-header {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      height: 34px;
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      border-bottom: 1px solid var(--vscode-editorGroup-border);
+      background: var(--vscode-editorStickyScroll-background, var(--vscode-editor-background));
+      color: var(--vscode-sideBarTitle-foreground);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .line {
+      display: grid;
+      grid-template-columns: 56px minmax(0, 1fr);
+      min-height: 20px;
+      font-family: var(--vscode-editor-font-family);
+      line-height: 20px;
+    }
+
+    .line-number {
+      user-select: none;
+      padding: 0 12px 0 8px;
+      text-align: right;
+      color: var(--vscode-editorLineNumber-foreground);
+    }
+
+    .line-text {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      padding-right: 18px;
+    }
+
+    .line.changed {
+      background: color-mix(in srgb, var(--vscode-diffEditor-insertedTextBackground, rgba(0, 255, 0, 0.18)) 70%, transparent);
+    }
+
+    .actions {
+      position: fixed;
+      right: 24px;
+      bottom: 18px;
+      z-index: 5;
+      display: flex;
+      gap: 8px;
+      padding: 8px;
+      border: 1px solid var(--vscode-widget-border, var(--vscode-editorGroup-border));
+      border-radius: 6px;
+      background: var(--vscode-editorWidget-background);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+    }
+
+    button {
+      min-width: 72px;
+      height: 30px;
+      border: 1px solid var(--vscode-button-border, transparent);
+      border-radius: 4px;
+      padding: 0 14px;
+      color: var(--vscode-button-secondaryForeground);
+      background: var(--vscode-button-secondaryBackground);
+      font: inherit;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: var(--vscode-button-secondaryHoverBackground);
+    }
+
+    button.primary {
+      color: var(--vscode-button-foreground);
+      background: var(--vscode-button-background);
+    }
+
+    button.primary:hover {
+      background: var(--vscode-button-hoverBackground);
+    }
+
+    button:focus-visible {
+      outline: 1px solid var(--vscode-focusBorder);
+      outline-offset: 2px;
+    }
+
+  </style>
+</head>
+<body>
+  <main class="preview" aria-label="Markdown translation preview">
+    <div class="preview-header">译文</div>
+    ${renderMarkdownPreviewLines(translatedLines)}
+  </main>
+  <div class="actions">
+    <button type="button" data-action="discard">丢弃</button>
+    <button type="button" class="primary" data-action="replace">替换</button>
+  </div>
+  <script nonce="${nonce}">
+    const vscode = acquireVsCodeApi();
+    document.querySelector('[data-action="replace"]').addEventListener('click', () => {
+      vscode.postMessage({ type: 'replace' });
+    });
+    document.querySelector('[data-action="discard"]').addEventListener('click', () => {
+      vscode.postMessage({ type: 'discard' });
+    });
+  </script>
+</body>
+</html>`;
+}
+function splitMarkdownPreviewLines(text) {
+    return text.split(/\r?\n/);
+}
+function renderMarkdownPreviewLines(lines) {
+    return lines.map((line, index) => {
+        const visibleLine = line.length > 0 ? escapeHtml(line) : '&nbsp;';
+        return `<div class="line changed"><span class="line-number">${index + 1}</span><span class="line-text">${visibleLine}</span></div>`;
+    }).join('');
+}
+function escapeHtml(value) {
+    return value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+function createNonce() {
+    const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    let nonce = '';
+    for (let index = 0; index < 32; index += 1) {
+        nonce += characters.charAt(Math.floor(Math.random() * characters.length));
+    }
+    return nonce;
 }
 function buildValidationFailureMessage(errors) {
     if (errors.length === 1 && errors[0] === 'Translated Markdown is identical to the source.') {
@@ -337,13 +510,5 @@ function formatSegmentIds(segments) {
         return `segments ${ids.join(', ')}`;
     }
     return `segments ${ids[0]}-${ids[ids.length - 1]} (${ids.length} total)`;
-}
-function createTranslatedMarkdownUri(sourceUri) {
-    const basename = path.basename(sourceUri.fsPath, '.md');
-    return vscode.Uri.from({
-        scheme: TranslatedMarkdownContentProvider.scheme,
-        path: `${sourceUri.path}.${basename}.zh.md`,
-        query: String(Date.now())
-    });
 }
 //# sourceMappingURL=translateMarkdown.js.map
