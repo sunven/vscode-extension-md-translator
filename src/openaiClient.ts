@@ -1,7 +1,4 @@
-export interface TranslationSegmentInput {
-  id: string
-  text: string
-}
+import { normalizeTranslatedText, TranslationClientError, TranslationSegmentInput } from './translationShared'
 
 export interface OpenAITranslationOptions {
   apiBaseUrl: string
@@ -14,13 +11,6 @@ export interface OpenAITranslationOptions {
   useJsonResponseFormat: boolean
   disableThinking: boolean
   forceTranslate?: boolean
-}
-
-export class TranslationClientError extends Error {
-  constructor(message: string, readonly status?: number) {
-    super(message)
-    this.name = 'TranslationClientError'
-  }
 }
 
 export async function translateSegmentsWithOpenAI(
@@ -323,10 +313,6 @@ function extractProviderMessage(responseText: string): string | undefined {
   } catch {
     return responseText.trim().slice(0, 300) || undefined
   }
-}
-
-function normalizeTranslatedText(text: string): string {
-  return text.replace(/\s*\r?\n\s*/g, ' ').trim()
 }
 
 function isTranslationResponse(value: unknown): value is { translations: Array<{ id: string; text: string }> } {

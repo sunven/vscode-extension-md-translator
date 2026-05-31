@@ -5,6 +5,7 @@
 .git/**
 .gitignore
 TODOS.md
+reports/**
 pnpm-lock.yaml
 tsconfig.json
 out/test/**

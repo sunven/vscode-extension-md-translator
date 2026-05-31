@@ -2,7 +2,7 @@
   "name": "vscode-extension-md-translator",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "0.0.7",
+  "version": "0.1.0",
   "publisher": "sunven",
   "license": "MIT",
   "repository": {
@@ -24,6 +24,7 @@
   ],
   "activationEvents": [
     "onCommand:mdTranslator.translateMarkdownToChinese",
+    "onCommand:mdTranslator.selectProvider",
     "onCommand:mdTranslator.setApiKey",
     "onCommand:mdTranslator.clearApiKey"
   ],
@@ -34,6 +35,11 @@
         "command": "mdTranslator.translateMarkdownToChinese",
         "title": "%command.translateMarkdownToChinese.title%",
         "icon": "$(globe)"
+      },
+      {
+        "command": "mdTranslator.selectProvider",
+        "title": "%command.selectProvider.title%",
+        "icon": "$(settings-gear)"
       },
       {
         "command": "mdTranslator.setApiKey",
@@ -49,6 +55,21 @@
     "configuration": {
       "title": "%configuration.title%",
       "properties": {
+        "mdTranslator.provider": {
+          "type": "string",
+          "enum": [
+            "ai",
+            "google",
+            "microsoft"
+          ],
+          "enumDescriptions": [
+            "AI translation via an OpenAI-compatible provider (requires an API key).",
+            "Google Translate (free, unofficial endpoint, no API key).",
+            "Microsoft Translator (free, unofficial endpoint, no API key)."
+          ],
+          "default": "ai",
+          "description": "%configuration.provider.description%"
+        },
         "mdTranslator.apiBaseUrl": {
           "type": "string",
           "default": "https://api.openai.com/v1",

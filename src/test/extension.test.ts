@@ -2,13 +2,29 @@ import { strict as assert } from 'assert'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as vscode from 'vscode'
+import { ProviderId } from '../config'
 import {
   discardLastPendingMarkdownTranslation,
   MarkdownTranslationDependencies,
   TranslatedMarkdownContentProvider,
   translateMarkdownToChinese
 } from '../translateMarkdown'
-import { TranslationClientError } from '../openaiClient'
+import { ProviderTranslationContext, TranslationProvider } from '../translationProvider'
+import { TranslationClientError, TranslationSegmentInput } from '../translationShared'
+
+type SegmentTranslator = (
+  segments: TranslationSegmentInput[],
+  context: ProviderTranslationContext
+) => Promise<Map<string, string>>
+
+function providerResolver(
+  translate: SegmentTranslator,
+  id: ProviderId = 'ai',
+  requiresApiKey = id === 'ai'
+): MarkdownTranslationDependencies['resolveProvider'] {
+  const provider: TranslationProvider = { id, requiresApiKey, translateSegments: translate }
+  return () => provider
+}
 
 describe('extension contributions', () => {
   it('contributes the public commands users need', async () => {
@@ -23,6 +39,7 @@ describe('extension contributions', () => {
     const commands = await vscode.commands.getCommands(true)
 
     assert.ok(commands.includes('mdTranslator.translateMarkdownToChinese'))
+    assert.ok(commands.includes('mdTranslator.selectProvider'))
     assert.ok(commands.includes('mdTranslator.setApiKey'))
     assert.ok(commands.includes('mdTranslator.clearApiKey'))
     assert.equal(translateMarkdownCommand.icon, '$(globe)')
@@ -70,26 +87,8 @@ describe('extension contributions', () => {
       }
     } as vscode.StatusBarItem
 
-    const dependencies: MarkdownTranslationDependencies = {
-      readTranslationSettings: () => ({
-        apiBaseUrl: 'https://example.test/v1',
-        model: 'gpt-test',
-        temperature: 0.2,
-        maxChunkChars: 6000,
-        maxSegmentsPerChunk: 40,
-        maxResponseTokens: 4000,
-        targetLanguage: 'Simplified Chinese',
-        requestTimeoutMs: 1000,
-        useJsonResponseFormat: false,
-        disableThinking: true
-      }),
-      getApiKey: async () => 'test-key',
-      promptAndStoreApiKey: async () => undefined,
+    const dependencies = createSingleSegmentTranslationDependencies({
       readFile: async () => Buffer.from('# hello\n'),
-      writeFile: async () => undefined,
-      showWarningMessage: async () => undefined,
-      showInformationMessage: async () => undefined,
-      showErrorMessage: async () => undefined,
       createStatusBarItem: (_alignment, priority) => priority === 100 ? statusBarItem : {
         text: '',
         tooltip: '',
@@ -98,17 +97,14 @@ describe('extension contributions', () => {
         dispose() {}
       } as vscode.StatusBarItem,
       createWebviewPanel: (viewType, title, showOptions, options) => webviewPanels.create(viewType, title, showOptions, options),
-      withProgress: async (_options, task) => task({ report() {} }, { isCancellationRequested: false } as vscode.CancellationToken),
-      executeCommand: async () => undefined,
       parseMarkdownSegments: () => ({
         tokens: [{ kind: 'segment', id: 's1', original: 'hello' }],
         segments: [{ id: 's1', text: 'hello' }]
       }),
       createTranslationBatches: segments => [segments],
-      translateSegmentsWithOpenAI: async () => new Map([['s1', '你好']]),
-      applyTranslations: (_parsed, translations) => translations.get('s1') ?? '',
-      validateTranslatedMarkdown: () => ({ valid: true, errors: [] })
-    }
+      resolveProvider: providerResolver(async () => new Map([['s1', '你好']])),
+      applyTranslations: (_parsed, translations) => translations.get('s1') ?? ''
+    })
 
     await translateMarkdownToChinese(
       { secrets: { get: async () => 'test-key' } } as unknown as vscode.ExtensionContext,
@@ -120,6 +116,8 @@ describe('extension contributions', () => {
     assert.equal(statusBarItem.text, '$(sync~spin) Chunk 1 of 1')
     assert.equal(statusBarItem.tooltip, 'Chunk 1 of 1')
     assert.deepEqual(calls, [{ type: 'show' }, { type: 'dispose' }])
+
+    discardLastPendingMarkdownTranslation()
   })
 
   it('reports notification progress by completed chunks', async () => {
@@ -147,7 +145,7 @@ describe('extension contributions', () => {
         segments
       }),
       createTranslationBatches: () => segments.map(segment => [segment]),
-      translateSegmentsWithOpenAI: async (_options, batchSegments) => new Map(batchSegments.map(segment => [segment.id, `译文-${segment.id}`])),
+      resolveProvider: providerResolver(async batchSegments => new Map(batchSegments.map(segment => [segment.id, `译文-${segment.id}`]))),
       applyTranslations: (_parsed, translations) => segments.map(segment => translations.get(segment.id)).join('\n')
     })
 
@@ -170,86 +168,13 @@ describe('extension contributions', () => {
     discardLastPendingMarkdownTranslation()
   })
 
-  it('recovers from malformed provider responses by retrying and isolating segments', async () => {
-    const segments = [
-      { id: 's1', text: 'First paragraph.' },
-      { id: 's2', text: 'Second paragraph.' },
-      { id: 's3', text: 'Third paragraph.' }
-    ]
-    const translateCallSizes: number[] = []
-    const providerFailure = new TranslationClientError('Provider returned conflicting translation for segment id: s2')
-    let failedBatchAttempts = 0
-    const webviewPanels = createWebviewPanels()
-
-    const statusBarItem = {
-      text: '',
-      tooltip: '',
-      show() {},
-      dispose() {}
-    } as vscode.StatusBarItem
-
-    const dependencies: MarkdownTranslationDependencies = {
-      readTranslationSettings: () => ({
-        apiBaseUrl: 'https://example.test/v1',
-        model: 'gpt-test',
-        temperature: 0.2,
-        maxChunkChars: 6000,
-        maxSegmentsPerChunk: 40,
-        maxResponseTokens: 4000,
-        targetLanguage: 'Simplified Chinese',
-        requestTimeoutMs: 1000,
-        useJsonResponseFormat: false,
-        disableThinking: true
-      }),
-      getApiKey: async () => 'test-key',
-      promptAndStoreApiKey: async () => undefined,
-      readFile: async () => Buffer.from('original markdown'),
-      writeFile: async () => undefined,
-      showWarningMessage: async () => undefined,
-      showInformationMessage: async () => undefined,
-      showErrorMessage: async () => undefined,
-      createStatusBarItem: () => statusBarItem,
-      createWebviewPanel: (viewType, title, showOptions, options) => webviewPanels.create(viewType, title, showOptions, options),
-      withProgress: async (_options, task) => task({ report() {} }, { isCancellationRequested: false } as vscode.CancellationToken),
-      executeCommand: async () => undefined,
-      parseMarkdownSegments: () => ({
-        tokens: segments.map(segment => ({ kind: 'segment' as const, id: segment.id, original: segment.text })),
-        segments
-      }),
-      createTranslationBatches: batchSegments => [batchSegments],
-      translateSegmentsWithOpenAI: async (_options, batchSegments) => {
-        translateCallSizes.push(batchSegments.length)
-
-        if (batchSegments.length > 1 && failedBatchAttempts < 2) {
-          failedBatchAttempts += 1
-          throw providerFailure
-        }
-
-        return new Map(batchSegments.map(segment => [segment.id, `译文-${segment.id}`]))
-      },
-      applyTranslations: (_parsed, translations) => segments.map(segment => translations.get(segment.id)).join('\n'),
-      validateTranslatedMarkdown: () => ({ valid: true, errors: [] })
-    }
-
-    await translateMarkdownToChinese(
-      { secrets: { get: async () => 'test-key' } } as unknown as vscode.ExtensionContext,
-      new TranslatedMarkdownContentProvider(),
-      vscode.Uri.file('/tmp/doc.md'),
-      dependencies
-    )
-
-    assert.deepEqual(translateCallSizes, [3, 3, 1, 1, 1])
-    assert.equal(webviewPanels.panels.length, 1)
-  })
-
-  it('reports retry and single-segment recovery progress', async () => {
+  it('surfaces provider recovery progress through the status reporter', async () => {
     const segments = [
       { id: 's1', text: 'First paragraph.' },
       { id: 's2', text: 'Second paragraph.' }
     ]
-    const providerFailure = new TranslationClientError('Provider returned invalid JSON: broken')
+    const recoverableError = new TranslationClientError('Provider returned invalid JSON: broken')
     const progressMessages: string[] = []
-    let failedBatchAttempts = 0
     let now = 0
 
     const dependencies = createSingleSegmentTranslationDependencies({
@@ -270,14 +195,13 @@ describe('extension contributions', () => {
         segments
       }),
       createTranslationBatches: batchSegments => [batchSegments],
-      translateSegmentsWithOpenAI: async (_options, batchSegments) => {
-        if (batchSegments.length > 1 && failedBatchAttempts < 2) {
-          failedBatchAttempts += 1
-          throw providerFailure
-        }
-
+      resolveProvider: providerResolver(async (batchSegments, context) => {
+        context.reporter?.onRetry(recoverableError)
+        context.reporter?.onSingleSegmentFallbackStart(recoverableError)
+        context.reporter?.onSingleSegmentFallbackProgress(0, segments.length)
+        context.reporter?.onSingleSegmentFallbackProgress(1, segments.length)
         return new Map(batchSegments.map(segment => [segment.id, `译文-${segment.id}`]))
-      },
+      }),
       applyTranslations: (_parsed, translations) => segments.map(segment => translations.get(segment.id)).join('\n')
     })
 
@@ -301,67 +225,24 @@ describe('extension contributions', () => {
     discardLastPendingMarkdownTranslation()
   })
 
-  it('reports the isolated segment id when fallback translation still fails', async () => {
+  it('wraps a failing batch with the chunk and segment ids', async () => {
     const segments = [
       { id: 's1', text: 'First paragraph.' },
       { id: 's2', text: 'Second paragraph.' }
     ]
-    const batchFailure = new TranslationClientError('Provider returned conflicting translation for segment id: s2')
-    const segmentFailure = new TranslationClientError('Provider response is missing segment id: s2')
-    let failedBatchAttempts = 0
-    const webviewPanels = createWebviewPanels()
 
-    const statusBarItem = {
-      text: '',
-      tooltip: '',
-      show() {},
-      dispose() {}
-    } as vscode.StatusBarItem
-
-    const dependencies: MarkdownTranslationDependencies = {
-      readTranslationSettings: () => ({
-        apiBaseUrl: 'https://example.test/v1',
-        model: 'gpt-test',
-        temperature: 0.2,
-        maxChunkChars: 6000,
-        maxSegmentsPerChunk: 40,
-        maxResponseTokens: 4000,
-        targetLanguage: 'Simplified Chinese',
-        requestTimeoutMs: 1000,
-        useJsonResponseFormat: false,
-        disableThinking: true
-      }),
-      getApiKey: async () => 'test-key',
-      promptAndStoreApiKey: async () => undefined,
+    const dependencies = createSingleSegmentTranslationDependencies({
       readFile: async () => Buffer.from('original markdown'),
-      writeFile: async () => undefined,
-      showWarningMessage: async () => undefined,
-      showInformationMessage: async () => undefined,
-      showErrorMessage: async () => undefined,
-      createStatusBarItem: () => statusBarItem,
-      createWebviewPanel: (viewType, title, showOptions, options) => webviewPanels.create(viewType, title, showOptions, options),
-      withProgress: async (_options, task) => task({ report() {} }, { isCancellationRequested: false } as vscode.CancellationToken),
-      executeCommand: async () => undefined,
       parseMarkdownSegments: () => ({
         tokens: segments.map(segment => ({ kind: 'segment' as const, id: segment.id, original: segment.text })),
         segments
       }),
       createTranslationBatches: batchSegments => [batchSegments],
-      translateSegmentsWithOpenAI: async (_options, batchSegments) => {
-        if (batchSegments.length > 1 && failedBatchAttempts < 2) {
-          failedBatchAttempts += 1
-          throw batchFailure
-        }
-
-        if (batchSegments[0]?.id === 's2') {
-          throw segmentFailure
-        }
-
-        return new Map(batchSegments.map(segment => [segment.id, `译文-${segment.id}`]))
-      },
-      applyTranslations: () => '',
-      validateTranslatedMarkdown: () => ({ valid: true, errors: [] })
-    }
+      resolveProvider: providerResolver(async () => {
+        throw new TranslationClientError('Single-segment retry failed for s2: Provider response is missing segment id: s2')
+      }),
+      applyTranslations: () => ''
+    })
 
     await assert.rejects(
       () => translateMarkdownToChinese(
@@ -494,7 +375,7 @@ describe('extension contributions', () => {
     assert.equal(panel.disposed, true)
   })
 
-  it('retries when the provider returns unchanged Markdown', async () => {
+  it('retries when the AI provider returns unchanged Markdown', async () => {
     const targetLanguages: string[] = []
     const forceTranslateValues: Array<boolean | undefined> = []
     let providerCalls = 0
@@ -502,17 +383,17 @@ describe('extension contributions', () => {
 
     const dependencies = createSingleSegmentTranslationDependencies({
       readFile: async () => Buffer.from('hello'),
-      translateSegmentsWithOpenAI: async (options, batchSegments) => {
-        targetLanguages.push(options.targetLanguage)
-        forceTranslateValues.push(options.forceTranslate)
+      resolveProvider: providerResolver(async (segments, context) => {
+        targetLanguages.push(context.settings.targetLanguage)
+        forceTranslateValues.push(context.settings.forceTranslate)
         providerCalls += 1
 
         if (providerCalls === 1) {
-          return new Map(batchSegments.map(segment => [segment.id, segment.text]))
+          return new Map(segments.map(segment => [segment.id, segment.text]))
         }
 
-        return new Map(batchSegments.map(segment => [segment.id, '你好']))
-      },
+        return new Map(segments.map(segment => [segment.id, '你好']))
+      }, 'ai'),
       createWebviewPanel: (viewType, title, showOptions, options) => webviewPanels.create(viewType, title, showOptions, options)
     })
 
@@ -537,7 +418,7 @@ describe('extension contributions', () => {
 
     const dependencies = createSingleSegmentTranslationDependencies({
       readFile: async () => Buffer.from('hello'),
-      translateSegmentsWithOpenAI: async (_options, batchSegments) => new Map(batchSegments.map(segment => [segment.id, segment.text])),
+      resolveProvider: providerResolver(async segments => new Map(segments.map(segment => [segment.id, segment.text])), 'ai'),
       createWebviewPanel: (viewType, title, showOptions, options) => webviewPanels.create(viewType, title, showOptions, options),
       showErrorMessage: async message => {
         errorMessage = message
@@ -561,6 +442,64 @@ describe('extension contributions', () => {
       'Translation failed because the provider returned unchanged source text. Try a stronger translation model, lower temperature, or enable JSON response format if your provider supports it.'
     )
   })
+
+  it('skips the API key prompt for providers that do not require one', async () => {
+    let apiKeyReads = 0
+    let warned = false
+    const webviewPanels = createWebviewPanels()
+
+    const dependencies = createSingleSegmentTranslationDependencies({
+      readFile: async () => Buffer.from('hello'),
+      getApiKey: async () => {
+        apiKeyReads += 1
+        return undefined
+      },
+      showWarningMessage: async () => {
+        warned = true
+        return undefined
+      },
+      resolveProvider: providerResolver(async segments => new Map(segments.map(segment => [segment.id, '你好'])), 'google'),
+      createWebviewPanel: (viewType, title, showOptions, options) => webviewPanels.create(viewType, title, showOptions, options)
+    })
+
+    await translateMarkdownToChinese(
+      { secrets: { get: async () => undefined } } as unknown as vscode.ExtensionContext,
+      new TranslatedMarkdownContentProvider(),
+      vscode.Uri.file('/tmp/doc.md'),
+      dependencies
+    )
+
+    assert.equal(apiKeyReads, 0)
+    assert.equal(warned, false)
+    assert.equal(webviewPanels.panels.length, 1)
+
+    discardLastPendingMarkdownTranslation()
+  })
+
+  it('does not force-retry unchanged output for non-AI providers', async () => {
+    let providerCalls = 0
+    const webviewPanels = createWebviewPanels()
+
+    const dependencies = createSingleSegmentTranslationDependencies({
+      readFile: async () => Buffer.from('hello'),
+      resolveProvider: providerResolver(async segments => {
+        providerCalls += 1
+        return new Map(segments.map(segment => [segment.id, segment.text]))
+      }, 'google'),
+      createWebviewPanel: (viewType, title, showOptions, options) => webviewPanels.create(viewType, title, showOptions, options)
+    })
+
+    await translateMarkdownToChinese(
+      { secrets: { get: async () => undefined } } as unknown as vscode.ExtensionContext,
+      new TranslatedMarkdownContentProvider(),
+      vscode.Uri.file('/tmp/doc.md'),
+      dependencies
+    )
+
+    assert.equal(providerCalls, 1)
+
+    discardLastPendingMarkdownTranslation()
+  })
 })
 
 function createSingleSegmentTranslationDependencies(
@@ -577,6 +516,7 @@ function createSingleSegmentTranslationDependencies(
 
   return {
     readTranslationSettings: () => ({
+      provider: 'ai',
       apiBaseUrl: 'https://example.test/v1',
       model: 'gpt-test',
       temperature: 0.2,
@@ -604,7 +544,7 @@ function createSingleSegmentTranslationDependencies(
       segments: [{ id: 's1', text: 'hello' }]
     }),
     createTranslationBatches: segments => [segments],
-    translateSegmentsWithOpenAI: async () => new Map([['s1', '你好']]),
+    resolveProvider: providerResolver(async () => new Map([['s1', '你好']])),
     applyTranslations: (_parsed, translations) => translations.get('s1') ?? '',
     validateTranslatedMarkdown: () => ({ valid: true, errors: [] }),
     ...overrides

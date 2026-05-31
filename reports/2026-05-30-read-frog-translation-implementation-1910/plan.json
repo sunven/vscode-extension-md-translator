@@ -1,0 +1,216 @@
+{
+  "research_goal": "厘清 read-frog 仓库中翻译功能的端到端实现链路，解释开发者应如何理解和复用其关键模块。",
+  "scope": {
+    "objects": [
+      "https://github.com/mengxi-ream/read-frog",
+      "默认分支最新源码中的翻译相关模块",
+      "项目文档中与翻译、AI provider、浏览器扩展运行机制相关的说明"
+    ],
+    "time_range": "以 2026-05-30 可获取的 GitHub 默认分支代码为准；必要时核验远端 HEAD。",
+    "region": "全球开源项目，不限定地域；文档语言可能包含英文与中文。",
+    "audience_or_use": "面向希望理解或复用 read-frog 翻译实现的工程开发者。",
+    "exclusions": [
+      "不评估产品商业价值、用户规模或增长",
+      "不深入研究与翻译无直接关系的阅读、笔记或 UI 装饰功能",
+      "不做与其他翻译插件的完整竞品对比"
+    ],
+    "assumptions": [
+      "GitHub 源码是最可信的原始证据",
+      "若公开搜索结果和源码不一致，以源码为准，并记录版本不确定性",
+      "用户关注的是实现机制而非安装教程"
+    ]
+  },
+  "report_shape": {
+    "format_basis": [
+      {
+        "type": "domain_convention",
+        "name": "开源技术实现分析报告",
+        "credibility_reason": "针对代码库实现机制的研究通常需要先给出结论，再按入口、数据流、核心模块、约束与可复用点展开。",
+        "what_extracted": "终稿采用摘要、版本与范围、端到端流程、核心模块拆解、关键设计判断、风险与复用建议的结构。"
+      }
+    ],
+    "sections": [
+      "摘要",
+      "研究对象与版本范围",
+      "翻译链路总览",
+      "核心实现拆解",
+      "关键设计判断",
+      "不确定性与复用建议"
+    ],
+    "mandatory_elements": [
+      "翻译调用链路表",
+      "从用户触发到结果展示的 Mermaid 流程图",
+      "核心源码文件与职责矩阵",
+      "实现风险与可复用点清单"
+    ],
+    "style": "中文技术报告，结论先行，所有关键判断回到源码证据；对未能确认的版本、运行环境或外部服务行为明确标注不确定性。"
+  },
+  "completion_criteria": [
+    "远端仓库默认分支和本地克隆代码已确认",
+    "每个维度至少完成两轮检索或源码定位，并包含原始源码证据",
+    "翻译入口、文本抽取、模型请求、结果展示四类关键问题均被回答或明确标注缺口",
+    "所有必要维度的 status 均为 done",
+    "synthesis.md 能形成 2-5 条主线判断并支撑最终报告"
+  ],
+  "change_notes": [],
+  "dimensions": [
+    {
+      "id": "d1",
+      "name": "项目结构与翻译入口定位",
+      "description": "确认 read-frog 的技术栈、运行形态、默认分支版本，以及用户触发翻译功能的入口；不深入分析具体 LLM 请求细节。",
+      "key_questions": [
+        "仓库当前默认分支和源码结构是什么？",
+        "翻译功能从哪些 UI、content script、background 或共享模块入口触发？",
+        "入口层如何把用户上下文传给后续翻译逻辑？"
+      ],
+      "method": "源码目录梳理、README/配置文件核验、关键词搜索和调用链追踪。",
+      "search_strategy": {
+        "source_types": [
+          "GitHub 仓库源码",
+          "项目 README/文档",
+          "package/manifest/build 配置",
+          "开发者搜索结果"
+        ],
+        "seed_queries": [
+          "mengxi-ream read-frog GitHub",
+          "read-frog translate",
+          "read-frog content script",
+          "read-frog extension manifest",
+          "read-frog package translate"
+        ],
+        "freshness_requirement": "需要核验 2026-05-30 当前远端 HEAD；源码文件以本地浅克隆为准。",
+        "sufficiency": [
+          "确认默认分支 HEAD",
+          "定位至少一个翻译功能触发入口",
+          "入口判断能被源码文件和配置文件共同支撑",
+          "连续两轮源码关键词搜索没有发现新的入口类别"
+        ]
+      },
+      "expected_output": "提供项目结构、运行入口、关键文件清单，并为后续维度提供调用链起点。",
+      "depends_on": [],
+      "status": "done"
+    },
+    {
+      "id": "d2",
+      "name": "文本抽取与上下文构造",
+      "description": "研究 read-frog 如何获取待翻译文本、页面上下文或用户选区，并构造成翻译任务输入；不分析模型服务的具体 HTTP 细节。",
+      "key_questions": [
+        "待翻译内容来自用户选区、DOM、页面段落还是其它数据结构？",
+        "系统如何分段、过滤、保留上下文或避免重复翻译？",
+        "输入构造对翻译质量、性能和隐私有什么影响？"
+      ],
+      "method": "沿 d1 入口追踪数据结构、DOM/selection 相关代码和 translation request payload。",
+      "search_strategy": {
+        "source_types": [
+          "GitHub 仓库源码",
+          "项目文档",
+          "DOM/selection 相关实现文件"
+        ],
+        "seed_queries": [
+          "read-frog selection translate",
+          "read-frog DOM translation",
+          "read-frog context text",
+          "read-frog sentence paragraph",
+          "read-frog selectedText"
+        ],
+        "freshness_requirement": "以当前源码为准；不需要外部市场最新信息。",
+        "sufficiency": [
+          "覆盖用户选区或页面文本的主要来源",
+          "定位输入数据结构或任务对象",
+          "能说明分段/上下文策略是否存在",
+          "每个关键问题至少有源码证据或明确缺口"
+        ]
+      },
+      "expected_output": "解释翻译任务输入如何生成，并标注潜在质量、性能和隐私约束。",
+      "depends_on": [
+        "d1"
+      ],
+      "status": "done"
+    },
+    {
+      "id": "d3",
+      "name": "模型 Provider、Prompt 与请求执行",
+      "description": "研究翻译请求如何从应用层进入 AI provider，包含 provider 抽象、模型配置、prompt/schema、流式或非流式响应处理；不评价模型翻译质量。",
+      "key_questions": [
+        "read-frog 支持哪些翻译 provider 或模型配置方式？",
+        "翻译 prompt、system message 或结构化输出如何组织？",
+        "请求执行是否使用流式输出、重试、错误处理或缓存？",
+        "API key、base URL 等敏感配置如何流转？"
+      ],
+      "method": "关键词搜索 provider/model/prompt/translate/stream，追踪调用链，核验配置类型和默认值。",
+      "search_strategy": {
+        "source_types": [
+          "GitHub 仓库源码",
+          "项目 README/配置文档",
+          "package 依赖",
+          "开发者搜索结果"
+        ],
+        "seed_queries": [
+          "read-frog provider openai",
+          "read-frog prompt translate",
+          "read-frog stream translation",
+          "read-frog AI SDK",
+          "read-frog api key model"
+        ],
+        "freshness_requirement": "以当前源码和文档为准；provider 支持项可能随版本变化，需标注版本范围。",
+        "sufficiency": [
+          "定位 provider 抽象和至少一个实际调用点",
+          "定位翻译 prompt 或消息构造处",
+          "说明响应处理是流式、批量还是二者兼有",
+          "关键实现能由源码和依赖/文档交叉支撑"
+        ]
+      },
+      "expected_output": "给出模型调用链路、配置流转、prompt 组织和响应处理机制。",
+      "depends_on": [
+        "d1",
+        "d2"
+      ],
+      "status": "done"
+    },
+    {
+      "id": "d4",
+      "name": "结果回填、状态管理与可复用判断",
+      "description": "研究翻译结果如何展示给用户、如何管理任务状态、错误和持久化，并总结该实现对其它项目的可复用点与风险。",
+      "key_questions": [
+        "翻译结果如何回填到页面或弹层 UI？",
+        "任务状态、loading、错误、取消或重试如何处理？",
+        "翻译结果是否缓存、持久化或与用户设置联动？",
+        "哪些模块适合复用，哪些地方需要改造？"
+      ],
+      "method": "沿 d3 响应处理继续追踪 UI state、storage、message passing、rendering 和错误处理代码。",
+      "search_strategy": {
+        "source_types": [
+          "GitHub 仓库源码",
+          "项目文档",
+          "浏览器扩展配置",
+          "相关 issue/讨论如可获取"
+        ],
+        "seed_queries": [
+          "read-frog translation result UI",
+          "read-frog storage translation",
+          "read-frog error handling translate",
+          "read-frog extension message translation",
+          "read-frog cache translation"
+        ],
+        "freshness_requirement": "以当前源码为准；issue/讨论仅作补充。",
+        "sufficiency": [
+          "结果展示路径可追踪到具体文件",
+          "状态和错误处理至少覆盖主要 happy path 与 failure path",
+          "缓存/持久化若未发现需明确说明搜索覆盖",
+          "形成可复用点与风险清单"
+        ]
+      },
+      "expected_output": "说明结果展示、状态管理和可迁移设计，并为最终报告提供风险与复用建议。",
+      "depends_on": [
+        "d3"
+      ],
+      "status": "done"
+    }
+  ],
+  "execution_order": [
+    "d1",
+    "d2",
+    "d3",
+    "d4"
+  ]
+}

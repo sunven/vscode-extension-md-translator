@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { clearApiKey, promptAndStoreApiKey } from "./config";
+import { clearApiKey, promptAndStoreApiKey, selectTranslationProvider } from "./config";
 import {
 	discardLastPendingMarkdownTranslation,
 	discardLastTranslationCommand,
@@ -25,6 +25,11 @@ export function activate(context: vscode.ExtensionContext) {
 	const setApiKeyCommand = vscode.commands.registerCommand(
 		"mdTranslator.setApiKey",
 		async () => promptAndStoreApiKey(context),
+	);
+
+	const selectProviderCommand = vscode.commands.registerCommand(
+		"mdTranslator.selectProvider",
+		async () => selectTranslationProvider(),
 	);
 
 	const clearApiKeyCommand = vscode.commands.registerCommand(
@@ -53,6 +58,7 @@ export function activate(context: vscode.ExtensionContext) {
 		),
 		translateMarkdownCommand,
 		setApiKeyCommand,
+		selectProviderCommand,
 		clearApiKeyCommand,
 		replaceLastTranslation,
 		discardLastTranslation,

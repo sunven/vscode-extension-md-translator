@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.validateTranslatedMarkdown = exports.createTranslationBatches = exports.applyTranslations = exports.splitLongMarkdownSegments = exports.parseMarkdownSegments = void 0;
-const openaiClient_1 = require("./openaiClient");
+const translationShared_1 = require("./translationShared");
 function parseMarkdownSegments(source) {
     const state = { nextSegmentNumber: 1 };
     const tokens = [];
@@ -97,7 +97,7 @@ function applyTranslations(parsed, translations) {
         }
         const translated = translations.get(token.id);
         if (translated === undefined) {
-            throw new openaiClient_1.TranslationClientError(`Missing translation for segment id: ${token.id}`);
+            throw new translationShared_1.TranslationClientError(`Missing translation for segment id: ${token.id}`);
         }
         return translated;
     }).join('');

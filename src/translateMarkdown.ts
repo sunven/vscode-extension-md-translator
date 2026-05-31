@@ -2,7 +2,8 @@ import * as path from 'path'
 import * as vscode from 'vscode'
 import { getApiKey, promptAndStoreApiKey, readTranslationSettings, TranslationSettings } from './config'
 import { createTranslationBatches, parseMarkdownSegments, applyTranslations, splitLongMarkdownSegments, validateTranslatedMarkdown } from './markdownSegments'
-import { TranslationClientError, TranslationSegmentInput, translateSegmentsWithOpenAI } from './openaiClient'
+import { ProviderTranslationContext, resolveProvider, TranslationProvider, TranslationRecoveryReporter } from './translationProvider'
+import { TranslationClientError, TranslationSegmentInput } from './translationShared'
 
 type TranslationRunSettings = TranslationSettings & { forceTranslate?: boolean }
 
@@ -65,7 +66,7 @@ export interface MarkdownTranslationDependencies {
   parseMarkdownSegments: typeof parseMarkdownSegments
   splitLongMarkdownSegments?: typeof splitLongMarkdownSegments
   createTranslationBatches: typeof createTranslationBatches
-  translateSegmentsWithOpenAI: typeof translateSegmentsWithOpenAI
+  resolveProvider: typeof resolveProvider
   applyTranslations: typeof applyTranslations
   validateTranslatedMarkdown: typeof validateTranslatedMarkdown
   now?: () => number
@@ -87,7 +88,7 @@ const defaultMarkdownTranslationDependencies: MarkdownTranslationDependencies = 
   parseMarkdownSegments,
   splitLongMarkdownSegments,
   createTranslationBatches,
-  translateSegmentsWithOpenAI,
+  resolveProvider,
   applyTranslations,
   validateTranslatedMarkdown,
   now: () => Date.now()
@@ -112,20 +113,25 @@ export async function translateMarkdownToChinese(
   }
 
   const settings = dependencies.readTranslationSettings()
-  const apiKey = await dependencies.getApiKey(context)
+  const provider = dependencies.resolveProvider(settings.provider)
+  let apiKey: string | undefined
 
-  if (!apiKey) {
-    const choice = await dependencies.showWarningMessage(
-      'OpenAI-compatible API key is not set.',
-      'Set API Key',
-      'Cancel'
-    )
+  if (provider.requiresApiKey) {
+    apiKey = await dependencies.getApiKey(context)
 
-    if (choice === 'Set API Key') {
-      await dependencies.promptAndStoreApiKey(context)
+    if (!apiKey) {
+      const choice = await dependencies.showWarningMessage(
+        'OpenAI-compatible API key is not set.',
+        'Set API Key',
+        'Cancel'
+      )
+
+      if (choice === 'Set API Key') {
+        await dependencies.promptAndStoreApiKey(context)
+      }
+
+      return
     }
-
-    return
   }
 
   const originalBytes = await dependencies.readFile(sourceUri)
@@ -159,10 +165,10 @@ export async function translateMarkdownToChinese(
         apiKey,
         batches,
         cancellationToken,
-        dependencies,
         loading,
         now: dependencies.now ?? Date.now,
         progress,
+        provider,
         settings,
         translations
       })
@@ -170,7 +176,7 @@ export async function translateMarkdownToChinese(
       progress.report({ message: 'Applying translations' })
       translatedText = dependencies.applyTranslations(parsed, translations)
 
-      if (translatedText === originalText) {
+      if (provider.id === 'ai' && translatedText === originalText) {
         if (cancellationToken.isCancellationRequested) {
           throw new Error('Translation cancelled.')
         }
@@ -186,10 +192,10 @@ export async function translateMarkdownToChinese(
           attemptLabel: 'Retry',
           batches,
           cancellationToken,
-          dependencies,
           loading,
           now: dependencies.now ?? Date.now,
           progress,
+          provider,
           settings: {
             ...settings,
             forceTranslate: true
@@ -231,18 +237,18 @@ export function discardLastPendingMarkdownTranslation(): void {
 }
 
 async function translateBatchesIntoMap(args: {
-  apiKey: string
+  apiKey?: string
   attemptLabel?: string
   batches: TranslationSegmentInput[][]
   cancellationToken: vscode.CancellationToken
-  dependencies: Pick<MarkdownTranslationDependencies, 'translateSegmentsWithOpenAI'>
   loading: vscode.StatusBarItem
   now: () => number
   progress: vscode.Progress<{ message?: string; increment?: number }>
+  provider: TranslationProvider
   settings: TranslationRunSettings
   translations: Map<string, string>
 }): Promise<void> {
-  const { apiKey, attemptLabel, batches, cancellationToken, dependencies, loading, now, progress, settings, translations } = args
+  const { apiKey, attemptLabel, batches, cancellationToken, loading, now, progress, provider, settings, translations } = args
   const progressIncrement = 100 / batches.length
 
   progress.report({ message: `0 of ${batches.length} chunks complete` })
@@ -260,35 +266,35 @@ async function translateBatchesIntoMap(args: {
     let batchTranslations: Map<string, string>
     const startedAt = now()
 
+    const reporter: TranslationRecoveryReporter = {
+      onRetry: error => {
+        const message = `${chunkLabel}: retrying after ${summarizeTranslationError(error)}`
+        loading.text = `$(sync~spin) ${chunkLabel} (retrying)`
+        loading.tooltip = message
+        progress.report({ message })
+      },
+      onSingleSegmentFallbackStart: error => {
+        const message = `${chunkLabel}: recovering one segment at a time after ${summarizeTranslationError(error)}`
+        loading.text = `$(sync~spin) ${chunkLabel} (recovering)`
+        loading.tooltip = message
+        progress.report({ message })
+      },
+      onSingleSegmentFallbackProgress: (segmentIndex, segmentCount) => {
+        const message = `${chunkLabel}: recovery segment ${segmentIndex + 1} of ${segmentCount}`
+        loading.text = `$(sync~spin) ${chunkLabel} recovery ${segmentIndex + 1}/${segmentCount}`
+        loading.tooltip = message
+        progress.report({ message })
+      }
+    }
+
+    const translationContext: ProviderTranslationContext = {
+      settings,
+      apiKey,
+      reporter
+    }
+
     try {
-      batchTranslations = await translateBatchWithRecovery(
-        dependencies.translateSegmentsWithOpenAI,
-        {
-          ...settings,
-          apiKey
-        },
-        batch,
-        {
-          onRetry: error => {
-            const message = `${chunkLabel}: retrying after ${summarizeTranslationError(error)}`
-            loading.text = `$(sync~spin) ${chunkLabel} (retrying)`
-            loading.tooltip = message
-            progress.report({ message })
-          },
-          onSingleSegmentFallbackStart: error => {
-            const message = `${chunkLabel}: recovering one segment at a time after ${summarizeTranslationError(error)}`
-            loading.text = `$(sync~spin) ${chunkLabel} (recovering)`
-            loading.tooltip = message
-            progress.report({ message })
-          },
-          onSingleSegmentFallbackProgress: (segmentIndex, segmentCount) => {
-            const message = `${chunkLabel}: recovery segment ${segmentIndex + 1} of ${segmentCount}`
-            loading.text = `$(sync~spin) ${chunkLabel} recovery ${segmentIndex + 1}/${segmentCount}`
-            loading.tooltip = message
-            progress.report({ message })
-          }
-        }
-      )
+      batchTranslations = await provider.translateSegments(batch, translationContext)
     } catch (error) {
       throw buildBatchTranslationError(error, index, batches.length, batch)
     }
@@ -572,54 +578,6 @@ function buildValidationFailureMessage(errors: string[]): string {
   return `Translation validation failed: ${errors.join(' ')}`
 }
 
-async function translateBatchWithRecovery(
-  translateSegments: typeof translateSegmentsWithOpenAI,
-  options: Parameters<typeof translateSegmentsWithOpenAI>[0],
-  segments: TranslationSegmentInput[],
-  reporter?: TranslationRecoveryReporter
-): Promise<Map<string, string>> {
-  try {
-    return await translateSegments(options, segments)
-  } catch (firstError) {
-    reporter?.onRetry(firstError)
-
-    try {
-      return await translateSegments(options, segments)
-    } catch (retryError) {
-      if (!canRecoverBySingleSegmentFallback(retryError, segments)) {
-        throw retryError
-      }
-
-      reporter?.onSingleSegmentFallbackStart(retryError)
-      const recovered = new Map<string, string>()
-
-      for (let index = 0; index < segments.length; index += 1) {
-        const segment = segments[index]
-        let segmentTranslations: Map<string, string>
-        reporter?.onSingleSegmentFallbackProgress(index, segments.length)
-
-        try {
-          segmentTranslations = await translateSegments(options, [segment])
-        } catch (segmentError) {
-          throw buildSingleSegmentFallbackError(segmentError, segment.id)
-        }
-
-        for (const [id, translatedText] of segmentTranslations) {
-          recovered.set(id, translatedText)
-        }
-      }
-
-      return recovered
-    }
-  }
-}
-
-interface TranslationRecoveryReporter {
-  onRetry(error: unknown): void
-  onSingleSegmentFallbackStart(error: unknown): void
-  onSingleSegmentFallbackProgress(segmentIndex: number, segmentCount: number): void
-}
-
 function summarizeTranslationError(error: unknown): string {
   if (!(error instanceof Error)) {
     return 'an unknown provider error'
@@ -636,21 +594,6 @@ function formatDuration(milliseconds: number): string {
   return `${(milliseconds / 1000).toFixed(1)}s`
 }
 
-function canRecoverBySingleSegmentFallback(error: unknown, segments: TranslationSegmentInput[]): boolean {
-  if (segments.length <= 1 || !(error instanceof TranslationClientError)) {
-    return false
-  }
-
-  return [
-    'Provider returned conflicting translation for segment id:',
-    'Provider response is missing segment id:',
-    'Provider returned unknown segment id:',
-    'Provider returned invalid JSON:',
-    'Provider response must contain a translations array.',
-    'Provider response did not contain a JSON object.'
-  ].some(message => error.message.includes(message))
-}
-
 function buildBatchTranslationError(
   error: unknown,
   batchIndex: number,
@@ -662,16 +605,6 @@ function buildBatchTranslationError(
 
   return new TranslationClientError(
     `Chunk ${batchIndex + 1} of ${batchCount} failed for ${formatSegmentIds(segments)}: ${message}`,
-    status
-  )
-}
-
-function buildSingleSegmentFallbackError(error: unknown, segmentId: string): TranslationClientError {
-  const message = error instanceof Error ? error.message : 'Unknown provider error.'
-  const status = error instanceof TranslationClientError ? error.status : undefined
-
-  return new TranslationClientError(
-    `Single-segment retry failed for ${segmentId}: ${message}`,
     status
   )
 }

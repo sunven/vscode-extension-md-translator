@@ -2,7 +2,12 @@ import * as vscode from 'vscode'
 
 const API_KEY_SECRET = 'mdTranslator.openAiCompatibleApiKey'
 
+export type ProviderId = 'ai' | 'google' | 'microsoft'
+
+const PROVIDER_IDS: readonly ProviderId[] = ['ai', 'google', 'microsoft']
+
 export interface TranslationSettings {
+  provider: ProviderId
   apiBaseUrl: string
   model: string
   temperature: number
@@ -19,6 +24,7 @@ export function readTranslationSettings(): TranslationSettings {
   const config = vscode.workspace.getConfiguration('mdTranslator')
 
   return {
+    provider: normalizeProvider(config.get('provider', 'ai')),
     apiBaseUrl: normalizeBaseUrl(config.get('apiBaseUrl', 'https://api.openai.com/v1')),
     model: config.get('model', 'gpt-4o-mini').trim(),
     temperature: clampNumber(config.get('temperature', 0.2), 0, 2),
@@ -59,8 +65,37 @@ export async function clearApiKey(context: vscode.ExtensionContext): Promise<voi
   vscode.window.showInformationMessage('OpenAI-compatible API key cleared.')
 }
 
+export async function selectTranslationProvider(): Promise<void> {
+  const items: Array<vscode.QuickPickItem & { value: ProviderId }> = [
+    { label: 'AI (OpenAI-compatible)', description: 'Requires an API key', value: 'ai' },
+    { label: 'Google Translate', description: 'Free, no API key', value: 'google' },
+    { label: 'Microsoft Translator', description: 'Free, no API key', value: 'microsoft' }
+  ]
+
+  const current = readTranslationSettings().provider
+  const picked = await vscode.window.showQuickPick(
+    items.map(item => ({ ...item, picked: item.value === current })),
+    { title: 'Select translation method', placeHolder: 'Choose how Markdown is translated' }
+  )
+
+  if (!picked) {
+    return
+  }
+
+  await vscode.workspace
+    .getConfiguration('mdTranslator')
+    .update('provider', picked.value, vscode.ConfigurationTarget.Global)
+
+  vscode.window.showInformationMessage(`Translation method set to ${picked.label}.`)
+}
+
 function normalizeBaseUrl(value: string): string {
   return value.trim().replace(/\/+$/, '')
+}
+
+function normalizeProvider(value: string): ProviderId {
+  const normalized = value.trim() as ProviderId
+  return PROVIDER_IDS.includes(normalized) ? normalized : 'ai'
 }
 
 function clampNumber(value: number, min: number, max: number): number {

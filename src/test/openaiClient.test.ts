@@ -1,5 +1,5 @@
 import { strict as assert } from 'assert'
-import { applyDisableThinkingHint, decodeAssistantContent, parseTranslationResponse, translateSegmentsWithOpenAI, TranslationClientError } from '../openaiClient'
+import { applyDisableThinkingHint, decodeAssistantContent, parseTranslationResponse, translateSegmentsWithOpenAI } from '../openaiClient'
 
 describe('openaiClient', () => {
   it('parses valid translation JSON from plain content', () => {

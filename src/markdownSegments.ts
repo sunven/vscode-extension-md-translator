@@ -1,4 +1,4 @@
-import { TranslationClientError, TranslationSegmentInput } from './openaiClient'
+import { TranslationClientError, TranslationSegmentInput } from './translationShared'
 
 type MarkdownToken =
   | { kind: 'raw'; text: string }

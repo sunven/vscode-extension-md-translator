@@ -1,11 +1,13 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.clearApiKey = exports.promptAndStoreApiKey = exports.getApiKey = exports.readTranslationSettings = void 0;
+exports.selectTranslationProvider = exports.clearApiKey = exports.promptAndStoreApiKey = exports.getApiKey = exports.readTranslationSettings = void 0;
 const vscode = require("vscode");
 const API_KEY_SECRET = 'mdTranslator.openAiCompatibleApiKey';
+const PROVIDER_IDS = ['ai', 'google', 'microsoft'];
 function readTranslationSettings() {
     const config = vscode.workspace.getConfiguration('mdTranslator');
     return {
+        provider: normalizeProvider(config.get('provider', 'ai')),
         apiBaseUrl: normalizeBaseUrl(config.get('apiBaseUrl', 'https://api.openai.com/v1')),
         model: config.get('model', 'gpt-4o-mini').trim(),
         temperature: clampNumber(config.get('temperature', 0.2), 0, 2),
@@ -44,8 +46,29 @@ async function clearApiKey(context) {
     vscode.window.showInformationMessage('OpenAI-compatible API key cleared.');
 }
 exports.clearApiKey = clearApiKey;
+async function selectTranslationProvider() {
+    const items = [
+        { label: 'AI (OpenAI-compatible)', description: 'Requires an API key', value: 'ai' },
+        { label: 'Google Translate', description: 'Free, no API key', value: 'google' },
+        { label: 'Microsoft Translator', description: 'Free, no API key', value: 'microsoft' }
+    ];
+    const current = readTranslationSettings().provider;
+    const picked = await vscode.window.showQuickPick(items.map(item => ({ ...item, picked: item.value === current })), { title: 'Select translation method', placeHolder: 'Choose how Markdown is translated' });
+    if (!picked) {
+        return;
+    }
+    await vscode.workspace
+        .getConfiguration('mdTranslator')
+        .update('provider', picked.value, vscode.ConfigurationTarget.Global);
+    vscode.window.showInformationMessage(`Translation method set to ${picked.label}.`);
+}
+exports.selectTranslationProvider = selectTranslationProvider;
 function normalizeBaseUrl(value) {
     return value.trim().replace(/\/+$/, '');
+}
+function normalizeProvider(value) {
+    const normalized = value.trim();
+    return PROVIDER_IDS.includes(normalized) ? normalized : 'ai';
 }
 function clampNumber(value, min, max) {
     if (!Number.isFinite(value)) {

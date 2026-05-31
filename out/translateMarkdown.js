@@ -5,7 +5,8 @@ const path = require("path");
 const vscode = require("vscode");
 const config_1 = require("./config");
 const markdownSegments_1 = require("./markdownSegments");
-const openaiClient_1 = require("./openaiClient");
+const translationProvider_1 = require("./translationProvider");
+const translationShared_1 = require("./translationShared");
 exports.replaceLastTranslationCommand = 'mdTranslator.replaceLastTranslation';
 exports.discardLastTranslationCommand = 'mdTranslator.discardLastTranslation';
 let pendingMarkdownTranslation;
@@ -39,7 +40,7 @@ const defaultMarkdownTranslationDependencies = {
     parseMarkdownSegments: markdownSegments_1.parseMarkdownSegments,
     splitLongMarkdownSegments: markdownSegments_1.splitLongMarkdownSegments,
     createTranslationBatches: markdownSegments_1.createTranslationBatches,
-    translateSegmentsWithOpenAI: openaiClient_1.translateSegmentsWithOpenAI,
+    resolveProvider: translationProvider_1.resolveProvider,
     applyTranslations: markdownSegments_1.applyTranslations,
     validateTranslatedMarkdown: markdownSegments_1.validateTranslatedMarkdown,
     now: () => Date.now()
@@ -55,13 +56,17 @@ async function translateMarkdownToChinese(context, _contentProvider, uri, depend
         return;
     }
     const settings = dependencies.readTranslationSettings();
-    const apiKey = await dependencies.getApiKey(context);
-    if (!apiKey) {
-        const choice = await dependencies.showWarningMessage('OpenAI-compatible API key is not set.', 'Set API Key', 'Cancel');
-        if (choice === 'Set API Key') {
-            await dependencies.promptAndStoreApiKey(context);
+    const provider = dependencies.resolveProvider(settings.provider);
+    let apiKey;
+    if (provider.requiresApiKey) {
+        apiKey = await dependencies.getApiKey(context);
+        if (!apiKey) {
+            const choice = await dependencies.showWarningMessage('OpenAI-compatible API key is not set.', 'Set API Key', 'Cancel');
+            if (choice === 'Set API Key') {
+                await dependencies.promptAndStoreApiKey(context);
+            }
+            return;
         }
-        return;
     }
     const originalBytes = await dependencies.readFile(sourceUri);
     const originalText = Buffer.from(originalBytes).toString('utf8');
@@ -88,16 +93,16 @@ async function translateMarkdownToChinese(context, _contentProvider, uri, depend
                 apiKey,
                 batches,
                 cancellationToken,
-                dependencies,
                 loading,
                 now: dependencies.now ?? Date.now,
                 progress,
+                provider,
                 settings,
                 translations
             });
             progress.report({ message: 'Applying translations' });
             translatedText = dependencies.applyTranslations(parsed, translations);
-            if (translatedText === originalText) {
+            if (provider.id === 'ai' && translatedText === originalText) {
                 if (cancellationToken.isCancellationRequested) {
                     throw new Error('Translation cancelled.');
                 }
@@ -111,10 +116,10 @@ async function translateMarkdownToChinese(context, _contentProvider, uri, depend
                     attemptLabel: 'Retry',
                     batches,
                     cancellationToken,
-                    dependencies,
                     loading,
                     now: dependencies.now ?? Date.now,
                     progress,
+                    provider,
                     settings: {
                         ...settings,
                         forceTranslate: true
@@ -151,7 +156,7 @@ function discardLastPendingMarkdownTranslation() {
 }
 exports.discardLastPendingMarkdownTranslation = discardLastPendingMarkdownTranslation;
 async function translateBatchesIntoMap(args) {
-    const { apiKey, attemptLabel, batches, cancellationToken, dependencies, loading, now, progress, settings, translations } = args;
+    const { apiKey, attemptLabel, batches, cancellationToken, loading, now, progress, provider, settings, translations } = args;
     const progressIncrement = 100 / batches.length;
     progress.report({ message: `0 of ${batches.length} chunks complete` });
     for (let index = 0; index < batches.length; index += 1) {
@@ -164,30 +169,33 @@ async function translateBatchesIntoMap(args) {
         const batch = batches[index];
         let batchTranslations;
         const startedAt = now();
+        const reporter = {
+            onRetry: error => {
+                const message = `${chunkLabel}: retrying after ${summarizeTranslationError(error)}`;
+                loading.text = `$(sync~spin) ${chunkLabel} (retrying)`;
+                loading.tooltip = message;
+                progress.report({ message });
+            },
+            onSingleSegmentFallbackStart: error => {
+                const message = `${chunkLabel}: recovering one segment at a time after ${summarizeTranslationError(error)}`;
+                loading.text = `$(sync~spin) ${chunkLabel} (recovering)`;
+                loading.tooltip = message;
+                progress.report({ message });
+            },
+            onSingleSegmentFallbackProgress: (segmentIndex, segmentCount) => {
+                const message = `${chunkLabel}: recovery segment ${segmentIndex + 1} of ${segmentCount}`;
+                loading.text = `$(sync~spin) ${chunkLabel} recovery ${segmentIndex + 1}/${segmentCount}`;
+                loading.tooltip = message;
+                progress.report({ message });
+            }
+        };
+        const translationContext = {
+            settings,
+            apiKey,
+            reporter
+        };
         try {
-            batchTranslations = await translateBatchWithRecovery(dependencies.translateSegmentsWithOpenAI, {
-                ...settings,
-                apiKey
-            }, batch, {
-                onRetry: error => {
-                    const message = `${chunkLabel}: retrying after ${summarizeTranslationError(error)}`;
-                    loading.text = `$(sync~spin) ${chunkLabel} (retrying)`;
-                    loading.tooltip = message;
-                    progress.report({ message });
-                },
-                onSingleSegmentFallbackStart: error => {
-                    const message = `${chunkLabel}: recovering one segment at a time after ${summarizeTranslationError(error)}`;
-                    loading.text = `$(sync~spin) ${chunkLabel} (recovering)`;
-                    loading.tooltip = message;
-                    progress.report({ message });
-                },
-                onSingleSegmentFallbackProgress: (segmentIndex, segmentCount) => {
-                    const message = `${chunkLabel}: recovery segment ${segmentIndex + 1} of ${segmentCount}`;
-                    loading.text = `$(sync~spin) ${chunkLabel} recovery ${segmentIndex + 1}/${segmentCount}`;
-                    loading.tooltip = message;
-                    progress.report({ message });
-                }
-            });
+            batchTranslations = await provider.translateSegments(batch, translationContext);
         }
         catch (error) {
             throw buildBatchTranslationError(error, index, batches.length, batch);
@@ -433,39 +441,6 @@ function buildValidationFailureMessage(errors) {
     }
     return `Translation validation failed: ${errors.join(' ')}`;
 }
-async function translateBatchWithRecovery(translateSegments, options, segments, reporter) {
-    try {
-        return await translateSegments(options, segments);
-    }
-    catch (firstError) {
-        reporter?.onRetry(firstError);
-        try {
-            return await translateSegments(options, segments);
-        }
-        catch (retryError) {
-            if (!canRecoverBySingleSegmentFallback(retryError, segments)) {
-                throw retryError;
-            }
-            reporter?.onSingleSegmentFallbackStart(retryError);
-            const recovered = new Map();
-            for (let index = 0; index < segments.length; index += 1) {
-                const segment = segments[index];
-                let segmentTranslations;
-                reporter?.onSingleSegmentFallbackProgress(index, segments.length);
-                try {
-                    segmentTranslations = await translateSegments(options, [segment]);
-                }
-                catch (segmentError) {
-                    throw buildSingleSegmentFallbackError(segmentError, segment.id);
-                }
-                for (const [id, translatedText] of segmentTranslations) {
-                    recovered.set(id, translatedText);
-                }
-            }
-            return recovered;
-        }
-    }
-}
 function summarizeTranslationError(error) {
     if (!(error instanceof Error)) {
         return 'an unknown provider error';
@@ -478,28 +453,10 @@ function formatDuration(milliseconds) {
     }
     return `${(milliseconds / 1000).toFixed(1)}s`;
 }
-function canRecoverBySingleSegmentFallback(error, segments) {
-    if (segments.length <= 1 || !(error instanceof openaiClient_1.TranslationClientError)) {
-        return false;
-    }
-    return [
-        'Provider returned conflicting translation for segment id:',
-        'Provider response is missing segment id:',
-        'Provider returned unknown segment id:',
-        'Provider returned invalid JSON:',
-        'Provider response must contain a translations array.',
-        'Provider response did not contain a JSON object.'
-    ].some(message => error.message.includes(message));
-}
 function buildBatchTranslationError(error, batchIndex, batchCount, segments) {
     const message = error instanceof Error ? error.message : 'Unknown provider error.';
-    const status = error instanceof openaiClient_1.TranslationClientError ? error.status : undefined;
-    return new openaiClient_1.TranslationClientError(`Chunk ${batchIndex + 1} of ${batchCount} failed for ${formatSegmentIds(segments)}: ${message}`, status);
-}
-function buildSingleSegmentFallbackError(error, segmentId) {
-    const message = error instanceof Error ? error.message : 'Unknown provider error.';
-    const status = error instanceof openaiClient_1.TranslationClientError ? error.status : undefined;
-    return new openaiClient_1.TranslationClientError(`Single-segment retry failed for ${segmentId}: ${message}`, status);
+    const status = error instanceof translationShared_1.TranslationClientError ? error.status : undefined;
+    return new translationShared_1.TranslationClientError(`Chunk ${batchIndex + 1} of ${batchCount} failed for ${formatSegmentIds(segments)}: ${message}`, status);
 }
 function formatSegmentIds(segments) {
     const ids = segments.map(segment => segment.id);
